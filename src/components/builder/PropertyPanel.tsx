@@ -1,0 +1,407 @@
+'use client';
+
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { RotateCw, Trash2, Box, Layers, Save, Check, Loader2, AlertCircle, Pencil, Upload } from 'lucide-react';
+import { cn } from '@/lib/cn';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { useBuilderStore } from '@/features/builder/store';
+import { getModuleById } from '@/lib/constants/modules';
+import { getMaterialById } from '@/lib/constants/materials';
+import { MODULE_CATEGORY_LABELS } from '@/types/builder';
+import { FLOOR_LABELS, GRID_SIZE } from '@/lib/constants/grid';
+import { formatWon } from '@/lib/utils/format';
+import { MaterialPicker } from './MaterialPicker';
+import { SpeckleExportDialog } from './SpeckleExportDialog';
+
+function FloorAreaTable() {
+  const floorAreas = useBuilderStore((s) => s.floorAreas);
+
+  if (floorAreas.length === 0) return null;
+
+  const totalArea = floorAreas.reduce((sum, f) => sum + f.area, 0);
+
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-center gap-1.5">
+        <Layers className="h-3.5 w-3.5 text-blue-500" />
+        <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+          층별 건축가능 면적
+        </h3>
+      </div>
+      <div className="rounded-lg border border-slate-100 bg-slate-50 overflow-hidden">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-slate-200 bg-slate-100/60">
+              <th className="py-1.5 pl-3 pr-2 text-left font-medium text-slate-500">층</th>
+              <th className="py-1.5 px-2 text-right font-medium text-slate-500">가로</th>
+              <th className="py-1.5 px-2 text-right font-medium text-slate-500">세로</th>
+              <th className="py-1.5 pl-2 pr-3 text-right font-medium text-slate-500">면적</th>
+            </tr>
+          </thead>
+          <tbody>
+            {floorAreas.map((f) => (
+              <tr key={f.floor} className="border-b border-slate-100 last:border-b-0">
+                <td className="py-1.5 pl-3 pr-2 text-slate-700 font-medium">{f.floor}층</td>
+                <td className="py-1.5 px-2 text-right text-slate-600">{f.width.toFixed(1)}m</td>
+                <td className="py-1.5 px-2 text-right text-slate-600">{f.depth.toFixed(1)}m</td>
+                <td className="py-1.5 pl-2 pr-3 text-right text-slate-700 font-medium">{f.area.toFixed(1)}㎡</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="bg-blue-50/80 border-t border-blue-100">
+              <td colSpan={3} className="py-2 pl-3 pr-2 text-slate-700 font-semibold">합계 (연면적)</td>
+              <td className="py-2 pl-2 pr-3 text-right text-blue-700 font-bold">{totalArea.toFixed(1)}㎡</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+interface ProjectSummaryProps {
+  onSave?: () => void;
+  saveStatus?: 'idle' | 'saving' | 'saved' | 'error';
+  lastSavedAt?: string | null;
+  onRename?: (name: string) => void;
+}
+
+function ProjectSummary({ onSave, saveStatus = 'idle', lastSavedAt, onRename }: ProjectSummaryProps) {
+  const placements = useBuilderStore((s) => s.placements);
+  const projectName = useBuilderStore((s) => s.projectName);
+  const setProjectName = useBuilderStore((s) => s.setProjectName);
+
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState(projectName);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setEditValue(projectName);
+  }, [projectName]);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
+  const commitRename = useCallback(() => {
+    const trimmed = editValue.trim();
+    if (trimmed && trimmed !== projectName) {
+      setProjectName(trimmed);
+      onRename?.(trimmed);
+    }
+    setEditing(false);
+  }, [editValue, projectName, setProjectName, onRename]);
+
+  const totalModules = placements.length;
+  const totalArea = placements.reduce((sum, p) => {
+    const mod = getModuleById(p.moduleId);
+    if (!mod) return sum;
+    return sum + mod.width * mod.depth;
+  }, 0);
+  const totalCost = placements.reduce((sum, p) => {
+    const mod = getModuleById(p.moduleId);
+    if (!mod) return sum;
+    const mat = p.materialId ? getMaterialById(p.materialId) : undefined;
+    const multiplier = mat?.priceMultiplier ?? 1;
+    return sum + mod.basePrice * multiplier;
+  }, 0);
+  const floorSet = new Set(placements.map((p) => p.floor));
+
+  return (
+    <div className="space-y-4 p-4">
+      {/* 프로젝트 이름 */}
+      <div className="flex items-start gap-1.5">
+        {editing ? (
+          <input
+            ref={inputRef}
+            className="flex-1 rounded border border-blue-300 px-2 py-1 text-sm font-semibold text-slate-900 outline-none focus:ring-1 focus:ring-blue-400"
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={commitRename}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitRename();
+              if (e.key === 'Escape') { setEditValue(projectName); setEditing(false); }
+            }}
+          />
+        ) : (
+          <>
+            <h2 className="flex-1 text-sm font-semibold text-slate-900 leading-snug break-all">
+              {projectName}
+            </h2>
+            <button
+              className="mt-0.5 shrink-0 rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              onClick={() => setEditing(true)}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+          </>
+        )}
+      </div>
+
+      <Separator />
+      <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">프로젝트 요약</h3>
+      <div className="space-y-3">
+        <div className="flex justify-between text-sm">
+          <span className="text-slate-500">총 모듈</span>
+          <span className="font-medium text-slate-900">{totalModules}개</span>
+        </div>
+        <div className="flex justify-between text-sm">
+          <span className="text-slate-500">사용 층수</span>
+          <span className="font-medium text-slate-900">{floorSet.size}개 층</span>
+        </div>
+        <div className="flex justify-between text-sm">
+          <span className="text-slate-500">총 면적</span>
+          <span className="font-medium text-slate-900">{totalArea.toFixed(1)}m²</span>
+        </div>
+        <Separator />
+        <div className="flex justify-between text-sm">
+          <span className="text-slate-500">총 비용</span>
+          <span className="font-semibold text-slate-900">{formatWon(totalCost)}</span>
+        </div>
+      </div>
+
+      {/* Save button + status */}
+      <Separator />
+      <div className="space-y-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full"
+          onClick={onSave}
+          disabled={saveStatus === 'saving'}
+        >
+          {saveStatus === 'saving' ? (
+            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+          ) : saveStatus === 'saved' ? (
+            <Check className="mr-1.5 h-3.5 w-3.5 text-green-600" />
+          ) : saveStatus === 'error' ? (
+            <AlertCircle className="mr-1.5 h-3.5 w-3.5 text-red-500" />
+          ) : (
+            <Save className="mr-1.5 h-3.5 w-3.5" />
+          )}
+          {saveStatus === 'saving'
+            ? '저장 중...'
+            : saveStatus === 'saved'
+              ? '저장 완료'
+              : saveStatus === 'error'
+                ? '저장 실패 (재시도)'
+                : '프로젝트 저장'}
+        </Button>
+        {lastSavedAt && (
+          <p className="text-center text-xs text-slate-400">
+            마지막 저장: {lastSavedAt}
+          </p>
+        )}
+      </div>
+
+      {/* 층별 건축가능 면적 테이블 */}
+      <Separator />
+      <FloorAreaTable />
+
+      {totalModules === 0 && (
+        <div className="rounded-lg border border-dashed border-slate-300 py-8 text-center">
+          <Box className="mx-auto h-8 w-8 text-slate-300" />
+          <p className="mt-2 text-sm text-slate-400">
+            모듈을 배치해주세요
+          </p>
+          <p className="mt-1 text-xs text-slate-400">
+            왼쪽 라이브러리에서 모듈을 선택하세요
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SelectedModulePanel() {
+  const selectedPlacementIds = useBuilderStore((s) => s.selectedPlacementIds);
+  const placements = useBuilderStore((s) => s.placements);
+  const rotatePlacement = useBuilderStore((s) => s.rotatePlacement);
+  const removePlacement = useBuilderStore((s) => s.removePlacement);
+  const selectPlacement = useBuilderStore((s) => s.selectPlacement);
+  const [exportOpen, setExportOpen] = useState(false);
+
+  // Show first selected module's details
+  const placement = placements.find((p) => p.id === selectedPlacementIds[0]);
+  if (!placement) return null;
+
+  const mod = getModuleById(placement.moduleId);
+  if (!mod) return null;
+
+  const mat = placement.materialId ? getMaterialById(placement.materialId) : undefined;
+  const multiplier = mat?.priceMultiplier ?? 1;
+  const moduleCost = mod.basePrice * multiplier;
+
+  return (
+    <div className="space-y-4 p-4">
+      {/* Module name and category */}
+      <div>
+        <div className="flex items-center gap-2">
+          <div
+            className="h-4 w-4 rounded"
+            style={{ backgroundColor: placement.customColor ?? mat?.color ?? mod.color }}
+          />
+          <h2 className="text-sm font-semibold text-slate-900">{mod.nameKo}</h2>
+        </div>
+        <Badge variant="secondary" className="mt-1.5">
+          {MODULE_CATEGORY_LABELS[mod.category]}
+        </Badge>
+      </div>
+
+      <Separator />
+
+      {/* Dimensions */}
+      <div className="space-y-2">
+        <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wider">치수</h3>
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <div className="rounded-md bg-slate-50 px-2 py-1.5">
+            <div className="text-xs text-slate-400">W</div>
+            <div className="text-sm font-medium">{mod.width}m</div>
+          </div>
+          <div className="rounded-md bg-slate-50 px-2 py-1.5">
+            <div className="text-xs text-slate-400">D</div>
+            <div className="text-sm font-medium">{mod.depth}m</div>
+          </div>
+          <div className="rounded-md bg-slate-50 px-2 py-1.5">
+            <div className="text-xs text-slate-400">H</div>
+            <div className="text-sm font-medium">{mod.height}m</div>
+          </div>
+        </div>
+      </div>
+
+      <Separator />
+
+      {/* Position */}
+      <div className="space-y-2">
+        <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wider">위치</h3>
+        <div className="space-y-1.5 text-sm">
+          <div className="flex justify-between">
+            <span className="text-slate-500">그리드 X</span>
+            <span className="font-medium">{placement.gridX}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-500">그리드 Z</span>
+            <span className="font-medium">{placement.gridZ}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-500">층</span>
+            <span className="font-medium">{FLOOR_LABELS[placement.floor]}</span>
+          </div>
+        </div>
+      </div>
+
+      <Separator />
+
+      {/* Rotation */}
+      <div className="space-y-2">
+        <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wider">회전</h3>
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-slate-600">{placement.rotation}°</span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => rotatePlacement(placement.id)}
+            className="h-8"
+          >
+            <RotateCw className="mr-1.5 h-3.5 w-3.5" />
+            90° 회전
+          </Button>
+        </div>
+      </div>
+
+      <Separator />
+
+      {/* Material */}
+      <MaterialPicker />
+
+      <Separator />
+
+      {/* Cost */}
+      <div className="space-y-2">
+        <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wider">비용</h3>
+        <div className="space-y-1.5 text-sm">
+          <div className="flex justify-between">
+            <span className="text-slate-500">기본가</span>
+            <span>{formatWon(mod.basePrice)}</span>
+          </div>
+          {mat && (
+            <div className="flex justify-between">
+              <span className="text-slate-500">재질 배율</span>
+              <span>x{mat.priceMultiplier}</span>
+            </div>
+          )}
+          <Separator />
+          <div className="flex justify-between font-medium">
+            <span className="text-slate-700">합계</span>
+            <span className="text-slate-900">{formatWon(moduleCost)}</span>
+          </div>
+        </div>
+      </div>
+
+      <Separator />
+
+      {/* Speckle Export */}
+      <Button
+        variant="outline"
+        size="sm"
+        className="w-full"
+        onClick={() => setExportOpen(true)}
+      >
+        <Upload className="mr-1.5 h-3.5 w-3.5" />
+        Speckle로 내보내기
+      </Button>
+      <SpeckleExportDialog open={exportOpen} onOpenChange={setExportOpen} />
+
+      {/* Delete */}
+      <Button
+        variant="destructive"
+        size="sm"
+        className="w-full"
+        onClick={() => {
+          selectedPlacementIds.forEach((id) => removePlacement(id));
+          selectPlacement(null);
+        }}
+      >
+        <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+        {selectedPlacementIds.length > 1 ? `${selectedPlacementIds.length}개 모듈 삭제` : '모듈 삭제'}
+      </Button>
+    </div>
+  );
+}
+
+interface PropertyPanelProps {
+  onSave?: () => void;
+  saveStatus?: 'idle' | 'saving' | 'saved' | 'error';
+  lastSavedAt?: string | null;
+  onRename?: (name: string) => void;
+}
+
+export function PropertyPanel({ onSave, saveStatus, lastSavedAt, onRename }: PropertyPanelProps) {
+  const selectedPlacementIds = useBuilderStore((s) => s.selectedPlacementIds);
+  const hasSelection = selectedPlacementIds.length > 0;
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="border-b border-slate-200 px-4 py-3">
+        <h2 className="text-sm font-semibold text-slate-900">
+          {hasSelection
+            ? selectedPlacementIds.length > 1
+              ? `${selectedPlacementIds.length}개 모듈 선택`
+              : '모듈 속성'
+            : '속성 패널'}
+        </h2>
+      </div>
+      <ScrollArea className="flex-1">
+        {hasSelection ? (
+          <SelectedModulePanel />
+        ) : (
+          <ProjectSummary onSave={onSave} saveStatus={saveStatus} lastSavedAt={lastSavedAt} onRename={onRename} />
+        )}
+      </ScrollArea>
+    </div>
+  );
+}

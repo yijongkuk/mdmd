@@ -1,0 +1,199 @@
+generator client {
+  provider        = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+enum ZoneType {
+  ZONE_R1_EXCLUSIVE   // 제1종전용주거
+  ZONE_R2_EXCLUSIVE   // 제2종전용주거
+  ZONE_R1_GENERAL     // 제1종일반주거
+  ZONE_R2_GENERAL     // 제2종일반주거
+  ZONE_R3_GENERAL     // 제3종일반주거
+  ZONE_R_SEMI         // 준주거
+  ZONE_C_CENTRAL      // 중심상업
+  ZONE_C_GENERAL      // 일반상업
+  ZONE_C_NEIGHBORHOOD // 근린상업
+  ZONE_C_DISTRIBUTION // 유통상업
+  ZONE_I_EXCLUSIVE    // 전용공업
+  ZONE_I_GENERAL      // 일반공업
+  ZONE_I_SEMI         // 준공업
+  ZONE_G_CONSERVATION // 보전녹지
+  ZONE_G_PRODUCTION   // 생산녹지
+  ZONE_G_NATURAL      // 자연녹지
+  ZONE_M_CONSERVATION // 보전관리
+  ZONE_M_PRODUCTION   // 생산관리
+  ZONE_M_PLANNED      // 계획관리
+  ZONE_AGRICULTURE    // 농림
+}
+
+enum ModuleCategory {
+  STRUCTURAL
+  FUNCTIONAL
+  DESIGN
+}
+
+model LandParcel {
+  id            String   @id @default(cuid())
+  pnu           String   @unique // 필지고유번호
+  address       String // 주소
+  addressDetail String? // 상세주소
+  area          Float // 면적 (m²)
+  zoneType      ZoneType // 용도지역
+  officialPrice Float // 공시지가 (원/m²)
+  // PostGIS geometry stored via raw SQL
+  // geometry   Polygon 4326
+  // centroid   Point 4326
+  geometryJson  Json // GeoJSON polygon for app use
+  centroidLat   Float // 중심점 위도
+  centroidLng   Float // 중심점 경도
+
+  regulation BuildingRegulation?
+  projects   Project[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model BuildingRegulation {
+  id       String     @id @default(cuid())
+  parcelId String     @unique
+  parcel   LandParcel @relation(fields: [parcelId], references: [id])
+
+  maxCoverageRatio  Float // 건폐율 상한 (%)
+  maxFloorAreaRatio Float // 용적률 상한 (%)
+  maxHeight         Float // 높이제한 (m)
+  maxFloors         Int // 최대 층수
+
+  setbackFront Float // 전면 셋백 (m)
+  setbackRear  Float // 후면 셋백 (m)
+  setbackLeft  Float // 좌측 셋백 (m)
+  setbackRight Float // 우측 셋백 (m)
+
+  buildableArea     Float // 건축가능면적 (m²)
+  maxTotalFloorArea Float // 최대연면적 (m²)
+}
+
+model ModuleDefinition {
+  id          String         @id @default(cuid())
+  name        String         @unique
+  nameKo      String // 한국어 이름
+  category    ModuleCategory
+  description String?
+
+  width  Float // 실제 너비 (m)
+  depth  Float // 실제 깊이 (m)
+  height Float // 실제 높이 (m)
+
+  gridWidth  Int // 그리드 셀 수 (width)
+  gridDepth  Int // 그리드 셀 수 (depth)
+  gridHeight Int // 그리드 셀 수 (height) - usually 1 floor
+
+  modelUrl         String? // GLB 3D model URL
+  thumbnailUrl     String? // 썸네일 이미지
+  connectionPoints Json? // 연결 포인트 JSON array
+
+  baseMaterialId String?
+  basePrice      Float // 기본 단가 (원)
+
+  placements ModulePlacement[]
+
+  createdAt DateTime @default(now())
+}
+
+model Material {
+  id              String  @id @default(cuid())
+  name            String  @unique
+  nameKo          String // 한국어 이름
+  textureUrl      String?
+  color           String // hex color
+  roughness       Float   @default(0.5)
+  metalness       Float   @default(0.0)
+  priceMultiplier Float   @default(1.0) // 가격 배수
+
+  configs MaterialConfig[]
+}
+
+model Project {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+
+  parcelId String?
+  parcel   LandParcel? @relation(fields: [parcelId], references: [id])
+
+  gridSizeM Float @default(0.6) // 그리드 크기 (m)
+
+  totalModules Int   @default(0)
+  totalArea    Float @default(0) // 총 면적 (m²)
+  totalCost    Float @default(0) // 총 비용 (원)
+
+  placements ModulePlacement[]
+  materials  MaterialConfig[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ModulePlacement {
+  id String @id @default(cuid())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  moduleId String
+  module   ModuleDefinition @relation(fields: [moduleId], references: [id])
+
+  gridX Int // 그리드 X 위치
+  gridY Int // 그리드 Y 위치 (층 높이)
+  gridZ Int // 그리드 Z 위치
+
+  rotation Int @default(0) // 0, 90, 180, 270
+  floor    Int @default(1) // 층
+
+  createdAt DateTime @default(now())
+}
+
+model MaterialConfig {
+  id String @id @default(cuid())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  placementId String // 해당 ModulePlacement의 ID
+  materialId  String
+  material    Material @relation(fields: [materialId], references: [id])
+
+  customColor String? // 커스텀 색상 (hex)
+}
+
+model ClosedSchool {
+  id        String   @id @default(cuid())
+  oldId     String   @unique // JSON상의 ID (예: CS_xxxx)
+  name      String   // 학교명
+  
+  status    String   // 폐교상태 (미활용 등)
+  
+  sido      String
+  sigungu   String
+  address   String
+  
+  buildingArea Float? // 건물 연면적
+  landArea     Float  // 대지 면적
+  
+  appraisalLand     Float? // 대지 감정가
+  appraisalBuilding Float? // 건물 감정가
+  appraisalTotal    Float? // 총 감정가
+
+  futurePlan String? // 향후 활용계획
+
+  // 좌표 정보 (추후 지오코딩으로 채워넣을 예정)
+  lat Float?
+  lng Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
