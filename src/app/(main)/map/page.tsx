@@ -57,10 +57,9 @@ function MapPageInner() {
   const parcelCenter = useBuilderStore((s) => s.parcelCenter);
   const paramLat = Number(searchParams.get('lat')) || 0;
   const paramLng = Number(searchParams.get('lng')) || 0;
-  // URL 파라미터 우선, 없으면 빌더 스토어의 필지 좌표 사용 (뒤로가기 대응)
-  const mapInitialCenter = (paramLat && paramLng)
-    ? { lat: paramLat, lng: paramLng }
-    : parcelCenter ?? undefined;
+  // 빌더 스토어 우선 (최신 필지), 없으면 URL 파라미터 fallback
+  const mapInitialCenter = parcelCenter
+    ?? ((paramLat && paramLng) ? { lat: paramLat, lng: paramLng } : undefined);
   // 좌표가 전달되면 가까이 줌인 (level 4 ≈ 동네 수준)
   const mapInitialLevel = mapInitialCenter ? 4 : undefined;
 
