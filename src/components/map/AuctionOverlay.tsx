@@ -159,35 +159,6 @@ function auctionMarkerHtml(
   </div>`;
 }
 
-// ─── Viewport bounds helper ──────────────────────────────────
-interface ViewportBounds {
-  swLat: number;
-  swLng: number;
-  neLat: number;
-  neLng: number;
-}
-
-function getViewportBounds(padding = 0.2): ViewportBounds | null {
-  const map = getKakaoMapInstance();
-  if (!map || !window.kakao?.maps) return null;
-  const bounds = map.getBounds();
-  if (!bounds) return null;
-  const sw = bounds.getSouthWest();
-  const ne = bounds.getNorthEast();
-  const latPad = (ne.getLat() - sw.getLat()) * padding;
-  const lngPad = (ne.getLng() - sw.getLng()) * padding;
-  return {
-    swLat: sw.getLat() - latPad,
-    swLng: sw.getLng() - lngPad,
-    neLat: ne.getLat() + latPad,
-    neLng: ne.getLng() + lngPad,
-  };
-}
-
-function isInViewport(lat: number, lng: number, vp: ViewportBounds): boolean {
-  return lat >= vp.swLat && lat <= vp.neLat && lng >= vp.swLng && lng <= vp.neLng;
-}
-
 // ─── Component ───────────────────────────────────────────────
 export const AuctionOverlay = memo(function AuctionOverlay({
   properties,
@@ -338,14 +309,11 @@ export const AuctionOverlay = memo(function AuctionOverlay({
 
     const { kakao } = window;
     const mode = getDisplayMode(zoomLevel);
-    const viewport = getViewportBounds(0.2);
 
     // ── CLUSTER MODE ──
     if (mode === 'cluster') {
       const clusters = clusterAuctions(properties, zoomLevel);
       clusters.forEach((cluster) => {
-        // Viewport culling for clusters
-        if (viewport && !isInViewport(cluster.lat, cluster.lng, viewport)) return;
 
         const el = document.createElement('div');
         el.innerHTML = clusterHtml(cluster.count);
@@ -380,9 +348,6 @@ export const AuctionOverlay = memo(function AuctionOverlay({
 
       properties.forEach((property) => {
         if (property.lat == null || property.lng == null) return;
-
-        // Viewport culling — skip markers outside viewport + 20% buffer
-        if (viewport && !isInViewport(property.lat, property.lng, viewport)) return;
 
         visibleWithCoords.push(property);
 
