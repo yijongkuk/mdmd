@@ -107,6 +107,16 @@ function MapPageInner() {
     return true;
   }, [filters]);
 
+  // 뷰포트 내 좌표 있는 물건 (필터 미적용) — 필터 패널 카운트용
+  const viewportProperties = useMemo(() => {
+    const withCoords = auctionProperties.filter((p) => p.lat != null && p.lng != null);
+    if (!bounds) return withCoords;
+    return withCoords.filter((p) =>
+      p.lat! >= bounds.sw.lat && p.lat! <= bounds.ne.lat &&
+      p.lng! >= bounds.sw.lng && p.lng! <= bounds.ne.lng
+    );
+  }, [auctionProperties, bounds]);
+
   // 지도 마커용 — 좌표 있는 물건만
   const overlayProperties = useMemo(() => {
     return auctionProperties.filter((p) => p.lat != null && p.lng != null && applyFilters(p));
@@ -255,6 +265,7 @@ function MapPageInner() {
         filters={filters}
         onFiltersChange={handleFiltersChange}
         allProperties={auctionProperties}
+        viewportProperties={viewportProperties}
         filteredCount={filteredProperties.length}
       />
 

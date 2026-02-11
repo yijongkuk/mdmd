@@ -61,6 +61,7 @@ export function ModuleDragger({ buildablePolygon }: ModuleDraggerProps) {
   // Refs for values needed in window event handlers (avoids stale closures)
   const dragDeltaRef = useRef<{ deltaX: number; deltaZ: number } | null>(null);
   const collisionRef = useRef(false);
+  const oobRef = useRef(false);
   const draggedPlacementsRef = useRef(draggedPlacements);
   draggedPlacementsRef.current = draggedPlacements;
 
@@ -68,6 +69,7 @@ export function ModuleDragger({ buildablePolygon }: ModuleDraggerProps) {
     deltaX: number;
     deltaZ: number;
     collision: boolean;
+    outOfBounds: boolean;
   } | null>(null);
 
   const floorY = anchorPlacement ? floorToWorldY(anchorPlacement.floor) : 0;
@@ -113,6 +115,7 @@ export function ModuleDragger({ buildablePolygon }: ModuleDraggerProps) {
 
     // Check collision and bounds for ALL dragged modules at new positions (OBB)
     let blocked = false;
+    let oob = false;
     for (const p of draggedPlacementsRef.current) {
       const mod = getModuleById(p.moduleId);
       if (!mod) continue;
@@ -132,18 +135,19 @@ export function ModuleDragger({ buildablePolygon }: ModuleDraggerProps) {
 
       if (buildablePolygon && buildablePolygon.length >= 3) {
         if (!checkOBBInBounds(obb, buildablePolygon)) {
-          blocked = true; break;
+          blocked = true; oob = true; break;
         }
       }
     }
 
     collisionRef.current = blocked;
+    oobRef.current = oob;
 
     // Only trigger re-render when delta or collision state changes
     setGhostState((prev) => {
-      if (prev && prev.deltaX === deltaX && prev.deltaZ === deltaZ && prev.collision === blocked)
+      if (prev && prev.deltaX === deltaX && prev.deltaZ === deltaZ && prev.collision === blocked && prev.outOfBounds === oob)
         return prev;
-      return { deltaX, deltaZ, collision: blocked };
+      return { deltaX, deltaZ, collision: blocked, outOfBounds: oob };
     });
   });
 
@@ -155,7 +159,7 @@ export function ModuleDragger({ buildablePolygon }: ModuleDraggerProps) {
       const delta = dragDeltaRef.current;
       if (delta) {
         if (collisionRef.current) {
-          showToast('이동할 수 없는 위치입니다');
+          showToast(oobRef.current ? '건축 영역 밖입니다' : '이동할 수 없는 위치입니다');
         } else if (delta.deltaX !== 0 || delta.deltaZ !== 0) {
           const moves = draggedPlacementsRef.current.map((p) => ({
             id: p.id,

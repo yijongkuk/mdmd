@@ -113,10 +113,12 @@ function pointInPolygon(px: number, pz: number, poly: LocalPoint[]): boolean {
   return inside;
 }
 
-/** Check if all 4 corners of OBB are inside the polygon */
+/**
+ * Check if the CENTER of the OBB is inside the polygon.
+ * 건축영역 선 = 모듈 중심점 기준 경계. 시각적으로 일관되고 예측 가능.
+ */
 export function checkOBBInBounds(obb: OBB2D, polygon: LocalPoint[]): boolean {
-  const corners = obbCorners(obb);
-  return corners.every((c) => pointInPolygon(c.x, c.z, polygon));
+  return pointInPolygon(obb.cx, obb.cz, polygon);
 }
 
 export interface CollisionResult {

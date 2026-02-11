@@ -14,6 +14,8 @@ interface AuctionFilterPanelProps {
   filters: AuctionFilters;
   onFiltersChange: (filters: AuctionFilters) => void;
   allProperties: AuctionProperty[];
+  /** 현재 뷰포트 내 매물 (필터 미적용) — 카테고리 카운트용 */
+  viewportProperties: AuctionProperty[];
   filteredCount: number;
 }
 
@@ -37,21 +39,22 @@ function buildAreaPresets(max: number): { label: string; range: [number, number]
   if (max <= 0) return [];
   if (max <= 500) {
     return [
-      { label: '100㎡ 이하', range: [0, 100] },
-      { label: '100~330㎡', range: [100, 330] },
+      { label: '150㎡ 미만', range: [0, 150] },
+      { label: '150~330㎡', range: [150, 330] },
       { label: '330㎡+', range: [330, max] },
     ];
   }
   if (max <= 3_000) {
     return [
-      { label: '100㎡ 이하', range: [0, 100] },
-      { label: '100~330㎡', range: [100, 330] },
+      { label: '150㎡ 미만', range: [0, 150] },
+      { label: '150~330㎡', range: [150, 330] },
       { label: '330~1000㎡', range: [330, 1_000] },
       { label: '1000㎡+', range: [1_000, max] },
     ];
   }
   return [
-    { label: '330㎡ 이하', range: [0, 330] },
+    { label: '150㎡ 미만', range: [0, 150] },
+    { label: '150~330㎡', range: [150, 330] },
     { label: '330~1000㎡', range: [330, 1_000] },
     { label: '1000~3000㎡', range: [1_000, 3_000] },
     { label: '3000㎡+', range: [3_000, max] },
@@ -62,21 +65,25 @@ function buildPricePresets(max: number): { label: string; range: [number, number
   if (max <= 0) return [];
   if (max <= 100_000_000) {
     return [
-      { label: '1천만 이하', range: [0, 10_000_000] },
+      { label: '1천만 미만', range: [0, 10_000_000] },
       { label: '1~5천만', range: [10_000_000, 50_000_000] },
       { label: '5천만~1억', range: [50_000_000, 100_000_000] },
     ];
   }
   if (max <= 1_000_000_000) {
     return [
-      { label: '1억 이하', range: [0, 100_000_000] },
+      { label: '1천만 미만', range: [0, 10_000_000] },
+      { label: '1~5천만', range: [10_000_000, 50_000_000] },
+      { label: '5천만~1억', range: [50_000_000, 100_000_000] },
       { label: '1~3억', range: [100_000_000, 300_000_000] },
       { label: '3~5억', range: [300_000_000, 500_000_000] },
       { label: '5억+', range: [500_000_000, max] },
     ];
   }
   return [
-    { label: '1억 이하', range: [0, 100_000_000] },
+    { label: '1천만 미만', range: [0, 10_000_000] },
+    { label: '1~5천만', range: [10_000_000, 50_000_000] },
+    { label: '5천만~1억', range: [50_000_000, 100_000_000] },
     { label: '1~5억', range: [100_000_000, 500_000_000] },
     { label: '5~10억', range: [500_000_000, 1_000_000_000] },
     { label: '10억+', range: [1_000_000_000, max] },
@@ -89,6 +96,7 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
   filters,
   onFiltersChange,
   allProperties,
+  viewportProperties,
   filteredCount,
 }: AuctionFilterPanelProps) {
   const [searchInput, setSearchInput] = useState(filters.searchQuery);
@@ -101,6 +109,10 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
   // Local state for slider visual feedback (updates immediately, debounces the filter change)
   const [localPriceRange, setLocalPriceRange] = useState(filters.priceRange);
   const [localAreaRange, setLocalAreaRange] = useState(filters.areaRange);
+
+  // 프리셋 중복선택 — 선택된 프리셋 라벨 추적
+  const [selectedPricePresets, setSelectedPricePresets] = useState<Set<string>>(new Set());
+  const [selectedAreaPresets, setSelectedAreaPresets] = useState<Set<string>>(new Set());
 
   // Sync local slider state when filters change from outside (e.g., preset click or reset)
   useEffect(() => {
@@ -120,33 +132,64 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
     return () => clearTimeout(searchDebounceRef.current);
   }, [searchInput, onFiltersChange]);
 
-  // Extract unique disposal methods with counts
+  // 뷰포트 + 가격/면적/검색/저단가 필터 적용 (처분방식/토지유형 제외) — 교차 필터 카운트 베이스
+  const countBase = useMemo(() => {
+    return viewportProperties.filter((p) => {
+      // 저단가 제외 (항상 적용)
+      if (p.appraisalValue > 0) {
+        if (p.area != null && p.area > 0 && p.appraisalValue / p.area < 10_000) return false;
+        if (!p.officialLandPrice && p.appraisalValue < 1_000_000) return false;
+      }
+      // 가격 필터
+      if (p.appraisalValue > 0) {
+        if (p.appraisalValue < filters.priceRange[0] || p.appraisalValue > filters.priceRange[1]) return false;
+      }
+      // 면적 필터
+      if (p.area != null) {
+        if (p.area < filters.areaRange[0] || p.area > filters.areaRange[1]) return false;
+      }
+      // 검색 필터
+      if (filters.searchQuery) {
+        const q = filters.searchQuery.toLowerCase();
+        if (!p.name.toLowerCase().includes(q) && !p.address.toLowerCase().includes(q)) return false;
+      }
+      return true;
+    });
+  }, [viewportProperties, filters.priceRange, filters.areaRange, filters.searchQuery]);
+
+  // Extract unique disposal methods with counts (가격/면적 필터 반영)
   const disposalMethodCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    allProperties.forEach((p) => {
+    countBase.forEach((p) => {
       if (p.disposalMethod) {
         counts.set(p.disposalMethod, (counts.get(p.disposalMethod) ?? 0) + 1);
       }
     });
     return counts;
-  }, [allProperties]);
-  const disposalMethods = useMemo(() =>
-    Array.from(disposalMethodCounts.keys()).sort(),
-  [disposalMethodCounts]);
+  }, [countBase]);
+  const disposalMethods = useMemo(() => {
+    const keys = new Set(disposalMethodCounts.keys());
+    // 현재 선택된 필터 값은 카운트 0이더라도 유지
+    for (const m of filters.disposalMethods) keys.add(m);
+    return Array.from(keys).sort();
+  }, [disposalMethodCounts, filters.disposalMethods]);
 
-  // Extract unique land types with counts
+  // Extract unique land types with counts (가격/면적 필터 반영)
   const landTypeCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    allProperties.forEach((p) => {
+    countBase.forEach((p) => {
       if (p.itemType) {
         counts.set(p.itemType, (counts.get(p.itemType) ?? 0) + 1);
       }
     });
     return counts;
-  }, [allProperties]);
-  const landTypes = useMemo(() =>
-    Array.from(landTypeCounts.keys()).sort(),
-  [landTypeCounts]);
+  }, [countBase]);
+  const landTypes = useMemo(() => {
+    const keys = new Set(landTypeCounts.keys());
+    // 현재 선택된 필터 값은 카운트 0이더라도 유지
+    for (const t of filters.landTypes) keys.add(t);
+    return Array.from(keys).sort();
+  }, [landTypeCounts, filters.landTypes]);
 
   // 감정가액 기준 가격 통계 (동적 범위)
   const priceStats = useMemo(() => {
@@ -176,35 +219,71 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
     setSearchInput('');
     setLocalPriceRange([0, Number.MAX_SAFE_INTEGER]);
     setLocalAreaRange([0, Number.MAX_SAFE_INTEGER]);
+    setSelectedPricePresets(new Set());
+    setSelectedAreaPresets(new Set());
     onFiltersChange({ ...DEFAULT_FILTERS });
   };
 
   // Debounced price slider: update local state immediately, debounce filter change
   const handlePriceChange = useCallback((value: number[]) => {
     setLocalPriceRange([value[0], value[1]]);
+    setSelectedPricePresets(new Set());
     clearTimeout(priceDebounceRef.current);
     priceDebounceRef.current = setTimeout(() => {
       onFiltersChange({ ...filtersRef.current, priceRange: [value[0], value[1]] });
     }, 300);
   }, [onFiltersChange]);
 
-  const handlePresetClick = (range: [number, number]) => {
-    setLocalPriceRange(range);
-    onFiltersChange({ ...filters, priceRange: range });
+  const handlePresetClick = (label: string, _range: [number, number], allPresets: { label: string; range: [number, number] }[]) => {
+    const next = new Set(selectedPricePresets);
+    if (next.has(label)) next.delete(label);
+    else next.add(label);
+    setSelectedPricePresets(next);
+
+    if (next.size === 0) {
+      const full: [number, number] = [0, Number.MAX_SAFE_INTEGER];
+      setLocalPriceRange(full);
+      onFiltersChange({ ...filtersRef.current, priceRange: full });
+      return;
+    }
+    let lo = Infinity, hi = -Infinity;
+    for (const p of allPresets) {
+      if (next.has(p.label)) { lo = Math.min(lo, p.range[0]); hi = Math.max(hi, p.range[1]); }
+    }
+    const combined: [number, number] = [lo, hi];
+    setLocalPriceRange(combined);
+    onFiltersChange({ ...filtersRef.current, priceRange: combined });
   };
 
   // Debounced area slider: update local state immediately, debounce filter change
   const handleAreaChange = useCallback((value: number[]) => {
     setLocalAreaRange([value[0], value[1]]);
+    setSelectedAreaPresets(new Set());
     clearTimeout(areaDebounceRef.current);
     areaDebounceRef.current = setTimeout(() => {
       onFiltersChange({ ...filtersRef.current, areaRange: [value[0], value[1]] });
     }, 300);
   }, [onFiltersChange]);
 
-  const handleAreaPresetClick = (range: [number, number]) => {
-    setLocalAreaRange(range);
-    onFiltersChange({ ...filters, areaRange: range });
+  const handleAreaPresetClick = (label: string, _range: [number, number], allPresets: { label: string; range: [number, number] }[]) => {
+    const next = new Set(selectedAreaPresets);
+    if (next.has(label)) next.delete(label);
+    else next.add(label);
+    setSelectedAreaPresets(next);
+
+    if (next.size === 0) {
+      const full: [number, number] = [0, Number.MAX_SAFE_INTEGER];
+      setLocalAreaRange(full);
+      onFiltersChange({ ...filtersRef.current, areaRange: full });
+      return;
+    }
+    let lo = Infinity, hi = -Infinity;
+    for (const p of allPresets) {
+      if (next.has(p.label)) { lo = Math.min(lo, p.range[0]); hi = Math.max(hi, p.range[1]); }
+    }
+    const combined: [number, number] = [lo, hi];
+    setLocalAreaRange(combined);
+    onFiltersChange({ ...filtersRef.current, areaRange: combined });
   };
 
   const handleDisposalToggle = (method: string) => {
@@ -223,44 +302,8 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
     onFiltersChange({ ...filters, landTypes: next });
   };
 
-  const handleRegionChange = (region: 'all' | 'metro') => {
-    onFiltersChange({ ...filters, region });
-  };
-
-  const handleDataSourceToggle = (source: string) => {
-    const current = filters.dataSources;
-    const next = current.includes(source)
-      ? current.filter((s) => s !== source)
-      : [...current, source];
-    onFiltersChange({ ...filters, dataSources: next });
-  };
-
-  // Data source counts
-  const dataSourceCounts = useMemo(() => {
-    const counts = { onbid: 0, closed_school: 0 };
-    allProperties.forEach((p) => {
-      const src = p.source ?? 'onbid';
-      if (src === 'onbid') counts.onbid++;
-      else if (src === 'closed_school') counts.closed_school++;
-    });
-    return counts;
-  }, [allProperties]);
-
-  // 저단가/비정상 매물 수
-  const lowUnitPriceCount = useMemo(() => {
-    return allProperties.filter((p) => {
-      if (p.appraisalValue <= 0) return false;
-      if (p.area != null && p.area > 0 && p.appraisalValue / p.area < 10_000) return true;
-      if (!p.officialLandPrice && p.appraisalValue < 1_000_000) return true;
-      return false;
-    }).length;
-  }, [allProperties]);
-
-  const isPresetActive = (range: [number, number]) =>
-    filters.priceRange[0] === range[0] && filters.priceRange[1] === range[1];
-
-  const isAreaPresetActive = (range: [number, number]) =>
-    filters.areaRange[0] === range[0] && filters.areaRange[1] === range[1];
+  const isPricePresetActive = (label: string) => selectedPricePresets.has(label);
+  const isAreaPresetActive = (label: string) => selectedAreaPresets.has(label);
 
   return (
     <div
@@ -298,67 +341,6 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto p-4 space-y-5">
-        {/* Data Source */}
-        <div>
-          <label className="text-xs font-medium text-slate-500 mb-1.5 block">
-            데이터 소스
-          </label>
-          <div className="space-y-1">
-            <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-slate-50">
-              <input
-                type="checkbox"
-                checked={filters.dataSources.length === 0}
-                onChange={() => onFiltersChange({ ...filters, dataSources: [] })}
-                className="h-3.5 w-3.5 rounded border-slate-300 text-red-500 focus:ring-red-500"
-              />
-              <span className="text-xs font-medium text-slate-700">전체</span>
-              <span className="ml-auto text-[10px] text-slate-400">
-                {dataSourceCounts.onbid + dataSourceCounts.closed_school}
-              </span>
-            </label>
-            {([
-              { key: 'onbid', label: 'OnBid 공매', count: dataSourceCounts.onbid },
-              { key: 'closed_school', label: '폐교 유휴부지', count: dataSourceCounts.closed_school },
-            ] as const).map(({ key, label, count }) => (
-              <label
-                key={key}
-                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 pl-5 hover:bg-slate-50"
-              >
-                <input
-                  type="checkbox"
-                  checked={filters.dataSources.includes(key)}
-                  onChange={() => handleDataSourceToggle(key)}
-                  className="h-3.5 w-3.5 rounded border-slate-300 text-red-500 focus:ring-red-500"
-                />
-                <span className="text-xs text-slate-700">{label}</span>
-                <span className="ml-auto text-[10px] text-slate-400">
-                  {count}
-                </span>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        {/* Low unit price filter */}
-        {lowUnitPriceCount > 0 && (
-          <div>
-            <label className="flex cursor-pointer items-center gap-2 rounded-md border border-slate-200 px-3 py-2 hover:bg-slate-50">
-              <input
-                type="checkbox"
-                checked={filters.excludeLowUnitPrice}
-                onChange={() => onFiltersChange({ ...filters, excludeLowUnitPrice: !filters.excludeLowUnitPrice })}
-                className="h-3.5 w-3.5 rounded border-slate-300 text-red-500 focus:ring-red-500"
-              />
-              <div className="flex-1 min-w-0">
-                <span className="text-xs font-medium text-slate-700">저단가 매물 제외</span>
-                <p className="text-[10px] text-slate-400 mt-0.5">
-                  단가 1만원/m² 미만 ({lowUnitPriceCount}건 제외)
-                </p>
-              </div>
-            </label>
-          </div>
-        )}
-
         {/* Search */}
         <div>
           <label className="text-xs font-medium text-slate-500 mb-1.5 block">
@@ -399,15 +381,16 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
                 step={priceStats.step}
                 onValueChange={handlePriceChange}
               />
+              {(() => { const presets = buildPricePresets(priceStats.max); return (
               <div className="mt-2.5 flex flex-wrap gap-1.5">
-                {buildPricePresets(priceStats.max).map((preset) => (
+                {presets.map((preset) => (
                   <button
                     key={preset.label}
                     type="button"
-                    onClick={() => handlePresetClick(preset.range)}
+                    onClick={() => handlePresetClick(preset.label, preset.range, presets)}
                     className={cn(
                       'rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors border',
-                      isPresetActive(preset.range)
+                      isPricePresetActive(preset.label)
                         ? 'border-red-400 bg-red-50 text-red-600'
                         : 'border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-700'
                     )}
@@ -416,6 +399,7 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
                   </button>
                 ))}
               </div>
+              ); })()}
             </>
           ) : (
             <p className="text-[10px] text-slate-400 mb-1.5">
@@ -448,15 +432,16 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
                 step={areaStats.step}
                 onValueChange={handleAreaChange}
               />
+              {(() => { const presets = buildAreaPresets(areaStats.max); return (
               <div className="mt-2.5 flex flex-wrap gap-1.5">
-                {buildAreaPresets(areaStats.max).map((preset) => (
+                {presets.map((preset) => (
                   <button
                     key={preset.label}
                     type="button"
-                    onClick={() => handleAreaPresetClick(preset.range)}
+                    onClick={() => handleAreaPresetClick(preset.label, preset.range, presets)}
                     className={cn(
                       'rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors border',
-                      isAreaPresetActive(preset.range)
+                      isAreaPresetActive(preset.label)
                         ? 'border-red-400 bg-red-50 text-red-600'
                         : 'border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-700'
                     )}
@@ -465,6 +450,7 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
                   </button>
                 ))}
               </div>
+              ); })()}
             </>
           ) : (
             <p className="text-[10px] text-slate-400 mb-1.5">
@@ -489,7 +475,7 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
                 />
                 <span className="text-xs font-medium text-slate-700">전체</span>
                 <span className="ml-auto text-[10px] text-slate-400">
-                  {allProperties.length}
+                  {countBase.length}
                 </span>
               </label>
               {disposalMethods.map((method) => (
@@ -529,7 +515,7 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
                 />
                 <span className="text-xs font-medium text-slate-700">전체</span>
                 <span className="ml-auto text-[10px] text-slate-400">
-                  {allProperties.length}
+                  {countBase.length}
                 </span>
               </label>
               {landTypes.map((type) => {
@@ -556,38 +542,6 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
           </div>
         )}
 
-        {/* Region */}
-        <div>
-          <label className="text-xs font-medium text-slate-500 mb-1.5 block">
-            지역
-          </label>
-          <div className="flex rounded-lg border border-slate-200 overflow-hidden">
-            <button
-              type="button"
-              onClick={() => handleRegionChange('all')}
-              className={cn(
-                'flex-1 px-3 py-1.5 text-xs font-medium transition-colors',
-                filters.region === 'all'
-                  ? 'bg-red-500 text-white'
-                  : 'bg-white text-slate-600 hover:bg-slate-50'
-              )}
-            >
-              전국
-            </button>
-            <button
-              type="button"
-              onClick={() => handleRegionChange('metro')}
-              className={cn(
-                'flex-1 px-3 py-1.5 text-xs font-medium transition-colors border-l border-slate-200',
-                filters.region === 'metro'
-                  ? 'bg-red-500 text-white'
-                  : 'bg-white text-slate-600 hover:bg-slate-50'
-              )}
-            >
-              수도권
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );

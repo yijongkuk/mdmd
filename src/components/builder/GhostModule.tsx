@@ -37,6 +37,7 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
 
   const [ghostPos, setGhostPos] = useState<{ gridX: number; gridZ: number } | null>(null);
   const [hasCollision, setHasCollision] = useState(false);
+  const [outOfBounds, setOutOfBounds] = useState(false);
   const [ghostRotation, setGhostRotation] = useState<number>(0);
   // Track pointerDown screen position to distinguish click vs drag (orbit)
   const pointerDownRef = useRef<{ x: number; y: number } | null>(null);
@@ -114,12 +115,13 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
       );
 
       // Check if module extends outside the buildable polygon
-      let outOfBounds = false;
+      let oob = false;
       if (buildablePolygon && buildablePolygon.length >= 3) {
-        outOfBounds = !checkOBBInBounds(obb, buildablePolygon);
+        oob = !checkOBBInBounds(obb, buildablePolygon);
       }
 
-      setHasCollision(result.hasCollision || outOfBounds);
+      setOutOfBounds(oob);
+      setHasCollision(result.hasCollision || oob);
     },
     [activeTool, moduleDef, currentFloor, placements, ghostRotation, gridOffset, gridSnap, parcelOffset, buildablePolygon, centerToCorner],
   );
@@ -146,7 +148,7 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
       e.stopPropagation();
 
       if (hasCollision) {
-        showToast('설치할 수 없는 위치입니다');
+        showToast(outOfBounds ? '건축 영역 밖입니다' : '설치할 수 없는 위치입니다');
         return;
       }
 
@@ -161,7 +163,7 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
         floor: currentFloor,
       });
     },
-    [activeTool, moduleDef, ghostPos, hasCollision, currentFloor, addPlacement, ghostRotation, showToast, centerToCorner],
+    [activeTool, moduleDef, ghostPos, hasCollision, outOfBounds, currentFloor, addPlacement, ghostRotation, showToast, centerToCorner],
   );
 
   if (activeTool !== 'place' || !moduleDef) return null;

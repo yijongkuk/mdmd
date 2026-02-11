@@ -17,10 +17,10 @@ import { BoxSelect } from './BoxSelect';
 import { RegulationBoundary } from './RegulationBoundary';
 import { RegulationBoundaryPolygon } from './RegulationBoundaryPolygon';
 import { BuildableVolume } from './BuildableVolume';
-import { SolarEnvelope } from './SolarEnvelope';
 import { TerrainMesh, type TerrainElevationGrid } from './TerrainMesh';
 import { SurroundingBuildings } from './SurroundingBuildings';
 import { SurroundingRoads } from './SurroundingRoads';
+import { SatelliteOverlay } from './SatelliteOverlay';
 import { geoJsonRingToLocal, wgs84ToLocal } from '@/lib/geo/coordTransform';
 import { polygonInset, polygonBounds, polygonSignedArea, gridCellsInPolygon } from '@/lib/geo/polygonClip';
 import type { ParcelInfo, SurroundingBuilding, SurroundingRoad } from '@/types/land';
@@ -247,10 +247,11 @@ interface BuilderCanvasProps {
   boundaryHeight?: number;
   parcelInfo?: ParcelInfo | null;
   showSurrounding?: boolean;
+  showSatellite?: boolean;
   rightSidebarOpen?: boolean;
 }
 
-function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showSurrounding = true, rightSidebarOpen = true }: BuilderCanvasProps) {
+function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showSurrounding = true, showSatellite = false, rightSidebarOpen = true }: BuilderCanvasProps) {
   const placements = useBuilderStore((s) => s.placements);
   const currentFloor = useBuilderStore((s) => s.currentFloor);
   const visibleFloors = useBuilderStore((s) => s.visibleFloors);
@@ -591,6 +592,15 @@ function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showS
 
         {/* All elements — shifted up to terrain level */}
         <group position={[0, terrainBaseY, 0]}>
+          {/* Satellite overlay — fixed position (ground truth) */}
+          {showSatellite && parcelInfo && (
+            <SatelliteOverlay
+              centroidLat={parcelInfo.centroidLat}
+              centroidLng={parcelInfo.centroidLng}
+              radius={surroundingRadius}
+            />
+          )}
+
           {/* Surrounding buildings/roads — fixed position (ground truth) */}
           {showSurrounding && filteredBuildings.length > 0 && parcelInfo && (
             <SurroundingBuildings
@@ -653,11 +663,11 @@ function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showS
               );
             })}
 
-            {/* Ghost module for placement preview */}
-            <GhostModule parcelOffset={parcelOffset} buildablePolygon={regulationPolygon} />
+            {/* Ghost module for placement preview — 건폐율 적용된 건축영역(와이어프레임)과 일치 */}
+            <GhostModule parcelOffset={parcelOffset} buildablePolygon={buildablePolygon ?? regulationPolygon} />
 
             {/* Drag-to-move ghost for selected modules */}
-            <ModuleDragger buildablePolygon={regulationPolygon} />
+            <ModuleDragger buildablePolygon={buildablePolygon ?? regulationPolygon} />
 
             {/* Box select (drag rectangle to select multiple modules) */}
             <BoxSelect parcelOffset={parcelOffset} />
@@ -686,11 +696,6 @@ function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showS
               />
             ) : null}
 
-            {/* Solar access envelope (정북일조사선) */}
-            {regulationPolygon && boundaryHeight && boundaryHeight > 9 && (
-              <SolarEnvelope polygon={regulationPolygon} maxHeight={boundaryHeight} />
-            )}
-
           </group>
         </group>
       </group>
@@ -701,7 +706,7 @@ function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showS
   );
 }
 
-export function BuilderCanvas({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showSurrounding = true, rightSidebarOpen = true }: BuilderCanvasProps) {
+export function BuilderCanvas({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showSurrounding = true, showSatellite = false, rightSidebarOpen = true }: BuilderCanvasProps) {
   return (
     <div className="h-full w-full">
       <Canvas
@@ -721,6 +726,7 @@ export function BuilderCanvas({ boundaryWidth, boundaryDepth, boundaryHeight, pa
             boundaryHeight={boundaryHeight}
             parcelInfo={parcelInfo}
             showSurrounding={showSurrounding}
+            showSatellite={showSatellite}
             rightSidebarOpen={rightSidebarOpen}
           />
         </Suspense>
