@@ -8,17 +8,16 @@ import { useBuilderStore } from '@/features/builder/store';
 import { getModuleById } from '@/lib/constants/modules';
 import { GRID_SIZE } from '@/lib/constants/grid';
 import {
-  worldToGrid,
+  worldToGridSnapped,
   gridToWorld,
   floorToWorldY,
-  getRotatedDimensions,
 } from '@/features/builder/utils/gridUtils';
 import {
-  createOccupancyMap,
-  checkCollision,
-  checkOutOfBounds,
-} from '@/features/builder/utils/collisionDetection';
-import type { LocalPoint } from '@/lib/geo/coordTransform';
+  placementToOBB,
+  checkOBBCollision,
+  checkOBBInBounds,
+} from '@/features/builder/utils/obbCollision';
+import type { LocalPoint } from '@/features/builder/utils/obbCollision';
 import type { ModulePlacement } from '@/types/builder';
 
 interface ModuleDraggerProps {
@@ -39,6 +38,7 @@ export function ModuleDragger({ buildablePolygon }: ModuleDraggerProps) {
   const movePlacements = useBuilderStore((s) => s.movePlacements);
   const endDrag = useBuilderStore((s) => s.endDrag);
   const gridOffset = useBuilderStore((s) => s.gridOffset);
+  const gridSnap = useBuilderStore((s) => s.gridSnap);
   const terrainBaseY = useBuilderStore((s) => s.terrainBaseY);
   const showToast = useBuilderStore((s) => s.showToast);
 
@@ -76,30 +76,8 @@ export function ModuleDragger({ buildablePolygon }: ModuleDraggerProps) {
   const _plane = useMemo(() => new THREE.Plane(), []);
   const _target = useMemo(() => new THREE.Vector3(), []);
 
-  // Occupancy map excluding ALL dragged modules
-  const occupancyMap = useMemo(() => {
-    const idSet = new Set(draggedIds);
-    const nonDragged = placements.filter((p) => !idSet.has(p.id));
-    return createOccupancyMap(nonDragged, getModuleById);
-  }, [placements, draggedIds]);
-
-  // Convert buildable polygon bounds to grid coordinate bounds
-  const buildableGridBounds = useMemo(() => {
-    if (!buildablePolygon || buildablePolygon.length < 3) return null;
-    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    for (const p of buildablePolygon) {
-      if (p.x < minX) minX = p.x;
-      if (p.x > maxX) maxX = p.x;
-      if (p.z < minZ) minZ = p.z;
-      if (p.z > maxZ) maxZ = p.z;
-    }
-    return {
-      minGridX: Math.ceil((minX - gridOffset.x) / GRID_SIZE),
-      maxGridX: Math.floor((maxX - gridOffset.x) / GRID_SIZE) - 1,
-      minGridZ: Math.ceil((minZ - gridOffset.z) / GRID_SIZE),
-      maxGridZ: Math.floor((maxZ - gridOffset.z) / GRID_SIZE) - 1,
-    };
-  }, [buildablePolygon, gridOffset]);
+  // Set of IDs being dragged (for exclusion in collision checks)
+  const excludeIdSet = useMemo(() => new Set(draggedIds), [draggedIds]);
 
   // Disable orbit controls while dragging
   const controls = useThree((s) => s.controls);
@@ -120,11 +98,12 @@ export function ModuleDragger({ buildablePolygon }: ModuleDraggerProps) {
     if (!state.raycaster.ray.intersectPlane(_plane, _target)) return;
 
     // Get new grid position for the anchor module
-    const grid = worldToGrid(
+    const grid = worldToGridSnapped(
       _target.x - (dragOffset?.x ?? 0),
       -_target.z - (dragOffset?.z ?? 0),
       gridOffset.x,
       gridOffset.z,
+      gridSnap,
     );
 
     // Compute delta from anchor's original position
@@ -132,7 +111,7 @@ export function ModuleDragger({ buildablePolygon }: ModuleDraggerProps) {
     const deltaZ = grid.gridZ - anchorPlacement.gridZ;
     dragDeltaRef.current = { deltaX, deltaZ };
 
-    // Check collision and bounds for ALL dragged modules at new positions
+    // Check collision and bounds for ALL dragged modules at new positions (OBB)
     let blocked = false;
     for (const p of draggedPlacementsRef.current) {
       const mod = getModuleById(p.moduleId);
@@ -140,14 +119,19 @@ export function ModuleDragger({ buildablePolygon }: ModuleDraggerProps) {
       const newGX = p.gridX + deltaX;
       const newGZ = p.gridZ + deltaZ;
 
-      const result = checkCollision(
-        occupancyMap, newGX, newGZ, p.floor,
-        mod.gridWidth, mod.gridDepth, p.rotation,
+      const obb = placementToOBB(
+        newGX, newGZ, mod.gridWidth, mod.gridDepth, p.rotation,
+        gridOffset.x, gridOffset.z,
+      );
+
+      const result = checkOBBCollision(
+        obb, p.floor, placements, getModuleById,
+        gridOffset.x, gridOffset.z, excludeIdSet,
       );
       if (result.hasCollision) { blocked = true; break; }
 
-      if (buildableGridBounds) {
-        if (checkOutOfBounds(newGX, newGZ, mod.gridWidth, mod.gridDepth, p.rotation, buildableGridBounds)) {
+      if (buildablePolygon && buildablePolygon.length >= 3) {
+        if (!checkOBBInBounds(obb, buildablePolygon)) {
           blocked = true; break;
         }
       }
@@ -220,20 +204,25 @@ export function ModuleDragger({ buildablePolygon }: ModuleDraggerProps) {
       {draggedPlacements.map((p) => {
         const mod = getModuleById(p.moduleId);
         if (!mod) return null;
-        const { width: rotW, depth: rotD } = getRotatedDimensions(mod.gridWidth, mod.gridDepth, p.rotation);
-        const realWidth = rotW * GRID_SIZE;
-        const realDepth = rotD * GRID_SIZE;
+        const realWidth = mod.gridWidth * GRID_SIZE;
+        const realDepth = mod.gridDepth * GRID_SIZE;
         const realHeight = mod.height;
         const pFloorY = floorToWorldY(p.floor);
         const wp = gridToWorld(p.gridX + deltaX, p.gridZ + deltaZ, gridOffset.x, gridOffset.z);
+        const rotY = (p.rotation * Math.PI) / 180;
+        const cosR = Math.cos(rotY);
+        const sinR = Math.sin(rotY);
+        const localCx = realWidth / 2;
+        const localCz = realDepth / 2;
         return (
           <mesh
             key={p.id}
             position={[
-              wp.x + realWidth / 2,
+              wp.x + localCx * cosR - localCz * sinR,
               pFloorY + realHeight / 2,
-              wp.z + realDepth / 2,
+              wp.z + localCx * sinR + localCz * cosR,
             ]}
+            rotation={[0, rotY, 0]}
           >
             <boxGeometry args={[realWidth, realHeight, realDepth]} />
             <meshStandardMaterial color={color} transparent opacity={0.5} />

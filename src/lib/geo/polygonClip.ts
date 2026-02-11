@@ -139,8 +139,11 @@ export function clipHorizontalLine(
 
 /**
  * Find the largest axis-aligned rectangle fully inscribed within a polygon.
- * Uses a sweep-line approach: sample horizontal slices, find x-range at each,
+ * Uses a sweep-line approach: sample horizontal slices, find interior segments,
  * then maximize area over all pairs of slices.
+ *
+ * Fixed for concave polygons: uses paired intersections (even/odd) so rectangles
+ * never span across concave gaps.
  */
 export function maxInscribedRect(
   polygon: LocalPoint[],
@@ -149,11 +152,10 @@ export function maxInscribedRect(
   const bounds = polygonBounds(polygon);
   const dz = (bounds.maxZ - bounds.minZ) / steps;
 
-  // For each z-row, find the x-range inside the polygon
+  // For each z-row, find ALL interior segments (paired intersections)
   const ranges: { z: number; left: number; right: number }[] = [];
   for (let i = 0; i <= steps; i++) {
     const z = bounds.minZ + i * dz;
-    // Find intersections of horizontal line with polygon edges
     const intersections: number[] = [];
     const n = polygon.length;
     for (let j = 0, k = n - 1; j < n; k = j++) {
@@ -166,7 +168,10 @@ export function maxInscribedRect(
     }
     if (intersections.length >= 2) {
       intersections.sort((a, b) => a - b);
-      ranges.push({ z, left: intersections[0], right: intersections[intersections.length - 1] });
+      // Pair intersections: each [2k, 2k+1] pair is a fully interior segment
+      for (let k = 0; k + 1 < intersections.length; k += 2) {
+        ranges.push({ z, left: intersections[k], right: intersections[k + 1] });
+      }
     }
   }
 
@@ -228,4 +233,189 @@ export function clipVerticalLine(
     }
   }
   return segments;
+}
+
+// ─── Grid Cell Algorithms ───────────────────────────────────────────
+
+/**
+ * Find all grid cells whose center lies inside the polygon.
+ * Returns a Set of "gx:gz" keys (integer grid coordinates).
+ */
+export function gridCellsInPolygon(
+  polygon: LocalPoint[],
+  gridSize: number,
+  offsetX: number,
+  offsetZ: number,
+): Set<string> {
+  const cells = new Set<string>();
+  if (polygon.length < 3) return cells;
+
+  const bounds = polygonBounds(polygon);
+  // Convert bounds to grid coordinates (expand by 1 to catch edge cells)
+  const gxMin = Math.floor((bounds.minX - offsetX) / gridSize) - 1;
+  const gxMax = Math.ceil((bounds.maxX - offsetX) / gridSize) + 1;
+  const gzMin = Math.floor((bounds.minZ - offsetZ) / gridSize) - 1;
+  const gzMax = Math.ceil((bounds.maxZ - offsetZ) / gridSize) + 1;
+
+  for (let gz = gzMin; gz <= gzMax; gz++) {
+    // Cell center in world coords
+    const centerZ = gz * gridSize + offsetZ + gridSize / 2;
+    for (let gx = gxMin; gx <= gxMax; gx++) {
+      const centerX = gx * gridSize + offsetX + gridSize / 2;
+      if (pointInPolygon({ x: centerX, z: centerZ }, polygon)) {
+        cells.add(`${gx}:${gz}`);
+      }
+    }
+  }
+
+  return cells;
+}
+
+/** A horizontal span of contiguous cells at a given z row */
+export interface RowSpan {
+  z: number;   // world z of row bottom edge
+  minX: number; // world x of span left edge
+  maxX: number; // world x of span right edge
+}
+
+/**
+ * Convert a cell set to sorted row spans (for rendering floor plates).
+ * Each row can have multiple spans (concave polygon → gaps).
+ */
+export function cellsToRowSpans(
+  cells: Set<string>,
+  gridSize: number,
+  offsetX: number,
+  offsetZ: number,
+): RowSpan[] {
+  if (cells.size === 0) return [];
+
+  // Group cells by gz
+  const rowMap = new Map<number, number[]>();
+  for (const key of cells) {
+    const [gxStr, gzStr] = key.split(':');
+    const gx = parseInt(gxStr, 10);
+    const gz = parseInt(gzStr, 10);
+    let arr = rowMap.get(gz);
+    if (!arr) { arr = []; rowMap.set(gz, arr); }
+    arr.push(gx);
+  }
+
+  const spans: RowSpan[] = [];
+  // Sort rows by gz
+  const sortedGz = Array.from(rowMap.keys()).sort((a, b) => a - b);
+
+  for (const gz of sortedGz) {
+    const gxList = rowMap.get(gz)!;
+    gxList.sort((a, b) => a - b);
+
+    // Build contiguous spans
+    let spanStart = gxList[0];
+    let spanEnd = gxList[0];
+    for (let i = 1; i < gxList.length; i++) {
+      if (gxList[i] === spanEnd + 1) {
+        spanEnd = gxList[i];
+      } else {
+        spans.push({
+          z: gz * gridSize + offsetZ,
+          minX: spanStart * gridSize + offsetX,
+          maxX: (spanEnd + 1) * gridSize + offsetX,
+        });
+        spanStart = gxList[i];
+        spanEnd = gxList[i];
+      }
+    }
+    spans.push({
+      z: gz * gridSize + offsetZ,
+      minX: spanStart * gridSize + offsetX,
+      maxX: (spanEnd + 1) * gridSize + offsetX,
+    });
+  }
+
+  return spans;
+}
+
+/**
+ * Compute boundary edges of a cell set for wireframe rendering.
+ * Returns a flat array of line segment coordinates: [x1,y1,z1, x2,y2,z2, ...]
+ * where y is a provided constant (floor height).
+ */
+export function cellsBoundaryEdges(
+  cells: Set<string>,
+  gridSize: number,
+  offsetX: number,
+  offsetZ: number,
+  y: number,
+): number[] {
+  const lines: number[] = [];
+
+  for (const key of cells) {
+    const [gxStr, gzStr] = key.split(':');
+    const gx = parseInt(gxStr, 10);
+    const gz = parseInt(gzStr, 10);
+
+    const x0 = gx * gridSize + offsetX;
+    const x1 = x0 + gridSize;
+    const z0 = gz * gridSize + offsetZ;
+    const z1 = z0 + gridSize;
+
+    // Bottom edge (z = z0): if no neighbor at gz-1
+    if (!cells.has(`${gx}:${gz - 1}`)) {
+      lines.push(x0, y, z0, x1, y, z0);
+    }
+    // Top edge (z = z1): if no neighbor at gz+1
+    if (!cells.has(`${gx}:${gz + 1}`)) {
+      lines.push(x0, y, z1, x1, y, z1);
+    }
+    // Left edge (x = x0): if no neighbor at gx-1
+    if (!cells.has(`${gx - 1}:${gz}`)) {
+      lines.push(x0, y, z0, x0, y, z1);
+    }
+    // Right edge (x = x1): if no neighbor at gx+1
+    if (!cells.has(`${gx + 1}:${gz}`)) {
+      lines.push(x1, y, z0, x1, y, z1);
+    }
+  }
+
+  return lines;
+}
+
+/**
+ * Compute the bounding box of a cell set in grid coordinates.
+ */
+export function cellsBounds(cells: Set<string>): { minGx: number; maxGx: number; minGz: number; maxGz: number } | null {
+  if (cells.size === 0) return null;
+  let minGx = Infinity, maxGx = -Infinity, minGz = Infinity, maxGz = -Infinity;
+  for (const key of cells) {
+    const [gxStr, gzStr] = key.split(':');
+    const gx = parseInt(gxStr, 10);
+    const gz = parseInt(gzStr, 10);
+    if (gx < minGx) minGx = gx;
+    if (gx > maxGx) maxGx = gx;
+    if (gz < minGz) minGz = gz;
+    if (gz > maxGz) maxGz = gz;
+  }
+  return { minGx, maxGx, minGz, maxGz };
+}
+
+/**
+ * Remove cells whose center Z (world coords) exceeds a given maxZ threshold.
+ * Used for solar clipping on upper floors.
+ */
+export function clipCellsNorth(
+  cells: Set<string>,
+  gridSize: number,
+  offsetZ: number,
+  maxZ: number,
+): Set<string> {
+  const clipped = new Set<string>();
+  for (const key of cells) {
+    const [gxStr, gzStr] = key.split(':');
+    const gz = parseInt(gzStr, 10);
+    const centerZ = gz * gridSize + offsetZ + gridSize / 2;
+    if (centerZ <= maxZ) {
+      clipped.add(key);
+    }
+  }
+  return clipped;
 }

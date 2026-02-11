@@ -139,6 +139,10 @@ function auctionMarkerHtml(
     ? 'box-shadow:0 0 0 3px #ef4444,0 2px 8px rgba(0,0,0,0.25);'
     : 'box-shadow:0 2px 6px rgba(0,0,0,0.2);';
 
+  // 감정가 표시: 항상 감정가 기준, 할인 시 최저입찰가도 표시
+  const hasDiscount = property.appraisalValue > 0 && property.appraisalValue !== property.minBidPrice;
+  const displayPrice = property.appraisalValue > 0 ? property.appraisalValue : property.minBidPrice;
+
   return `<div style="display:flex;flex-direction:column;align-items:center;cursor:pointer;">
     <div style="
       background:white;border-radius:8px;padding:4px 8px;
@@ -147,7 +151,11 @@ function auctionMarkerHtml(
       transition:transform .15s;
     " onmouseover="this.style.transform='scale(1.08)'" onmouseout="this.style.transform='scale(1)'">
       <div style="font-size:11px;font-weight:700;color:#1e293b;line-height:1.3;">${shortName}</div>
-      <div style="font-size:10px;color:#dc2626;font-weight:600;margin-top:1px;">${formatWon(property.minBidPrice)}</div>
+      ${hasDiscount
+        ? `<div style="font-size:9px;color:#94a3b8;text-decoration:line-through;">${formatWon(property.appraisalValue)}</div>
+           <div style="font-size:10px;color:#dc2626;font-weight:600;">${formatWon(property.minBidPrice)}</div>`
+        : `<div style="font-size:10px;color:#dc2626;font-weight:600;margin-top:1px;">${formatWon(displayPrice)}</div>`
+      }
       <div style="font-size:8px;font-weight:600;color:white;background:#f97316;
         border-radius:3px;padding:1px 4px;margin-top:2px;display:inline-block;">${property.disposalMethod || '공매'}</div>
     </div>
@@ -404,23 +412,29 @@ export const AuctionOverlay = memo(function AuctionOverlay({
     };
   }, [properties, zoomLevel, drawPolygon]);
 
-  // ─── SELECTION EFFECT: update marker HTML + draw polygon for selected ───
+  // Keep properties in ref for selection polygon drawing (avoids effect re-runs)
+  const propertiesRef = useRef(properties);
+  propertiesRef.current = properties;
+
+  // ─── MARKER HTML UPDATE: runs when properties or selectedId changes ───
+  useEffect(() => {
+    const mode = getDisplayMode(zoomLevel);
+    if (mode !== 'marker') return;
+
+    elementByIdRef.current.forEach((el, id) => {
+      const isSelected = id === selectedId;
+      const property = properties.find((p) => p.id === id);
+      if (!property) return;
+      const currentHtml = auctionMarkerHtml(property, isSelected);
+      if (el.innerHTML !== currentHtml) {
+        el.innerHTML = currentHtml;
+      }
+    });
+  }, [selectedId, properties, zoomLevel]);
+
+  // ─── SELECTION POLYGON: only re-draws when selectedId changes ───
   useEffect(() => {
     const map = getKakaoMapInstance();
-    const mode = getDisplayMode(zoomLevel);
-
-    // Update marker HTML in marker mode
-    if (mode === 'marker') {
-      elementByIdRef.current.forEach((el, id) => {
-        const isSelected = id === selectedId;
-        const property = properties.find((p) => p.id === id);
-        if (!property) return;
-        const currentHtml = auctionMarkerHtml(property, isSelected);
-        if (el.innerHTML !== currentHtml) {
-          el.innerHTML = currentHtml;
-        }
-      });
-    }
 
     // Clear previous selection polygons
     selPolygonsRef.current.forEach((p) => p.setMap(null));
@@ -428,10 +442,15 @@ export const AuctionOverlay = memo(function AuctionOverlay({
 
     // Draw polygon for selected property — works in ALL zoom modes
     if (selectedId && map && window.kakao?.maps) {
-      const selected = properties.find((p) => p.id === selectedId);
+      const selected = propertiesRef.current.find((p) => p.id === selectedId);
       if (selected) {
         drawPolygon(selected, map, window.kakao).then((drawn) => {
-          selPolygonsRef.current.push(...drawn);
+          // Only push if selectedId hasn't changed during async fetch
+          if (selectedIdRef.current === selectedId) {
+            selPolygonsRef.current.push(...drawn);
+          } else {
+            drawn.forEach((d: { setMap(m: null): void }) => d.setMap(null));
+          }
         });
       }
     }
@@ -440,7 +459,7 @@ export const AuctionOverlay = memo(function AuctionOverlay({
       selPolygonsRef.current.forEach((p) => p.setMap(null));
       selPolygonsRef.current = [];
     };
-  }, [selectedId, properties, zoomLevel, drawPolygon]);
+  }, [selectedId, drawPolygon]);
 
   return null;
 });

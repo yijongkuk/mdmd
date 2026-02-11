@@ -7,6 +7,7 @@ import {
   Undo2,
   Redo2,
   Building2,
+  Grid3x3,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
@@ -35,6 +36,8 @@ export function BuilderToolbar() {
   const rotatePlacement = useBuilderStore((s) => s.rotatePlacement);
   const showSurrounding = useBuilderStore((s) => s.showSurrounding);
   const toggleSurrounding = useBuilderStore((s) => s.toggleSurrounding);
+  const gridSnap = useBuilderStore((s) => s.gridSnap);
+  const toggleGridSnap = useBuilderStore((s) => s.toggleGridSnap);
   const copyPlacements = useBuilderStore((s) => s.copyPlacements);
   const pastePlacements = useBuilderStore((s) => s.pastePlacements);
   const removePlacement = useBuilderStore((s) => s.removePlacement);
@@ -83,11 +86,22 @@ export function BuilderToolbar() {
         case 'p':
           setActiveTool('place');
           break;
+        case 'g':
+          toggleGridSnap();
+          break;
+        case ' ':
+          // Space = clockwise rotation (place mode handled by GhostModule)
+          if (activeTool === 'place') break;
+          e.preventDefault();
+          if (selectedPlacementIds.length > 0) {
+            selectedPlacementIds.forEach((id) => rotatePlacement(id, 1));
+          }
+          break;
         case 'r':
-          // When in place mode, R is handled by GhostModule for ghost rotation
+          // R = counter-clockwise rotation (place mode handled by GhostModule)
           if (activeTool === 'place') break;
           if (selectedPlacementIds.length > 0) {
-            selectedPlacementIds.forEach((id) => rotatePlacement(id));
+            selectedPlacementIds.forEach((id) => rotatePlacement(id, -1));
           }
           break;
         case 'x':
@@ -105,7 +119,7 @@ export function BuilderToolbar() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeTool, setActiveTool, undo, redo, selectedPlacementIds, rotatePlacement, copyPlacements, pastePlacements, removePlacement, selectPlacement, showToast]);
+  }, [activeTool, setActiveTool, undo, redo, selectedPlacementIds, rotatePlacement, copyPlacements, pastePlacements, removePlacement, selectPlacement, showToast, toggleGridSnap]);
 
   return (
     <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 shadow-sm">
@@ -178,6 +192,22 @@ export function BuilderToolbar() {
         </TooltipTrigger>
         <TooltipContent side="bottom">
           주변 건물 {showSurrounding ? '숨기기' : '보기'}
+        </TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant={gridSnap ? 'default' : 'ghost'}
+            size="icon"
+            className="h-8 w-8"
+            onClick={toggleGridSnap}
+          >
+            <Grid3x3 className="h-4 w-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          그리드 스냅 {gridSnap ? '끄기' : '켜기'} <span className="ml-1 text-xs text-slate-400">(G)</span>
         </TooltipContent>
       </Tooltip>
     </div>

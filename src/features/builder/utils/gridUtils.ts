@@ -1,11 +1,24 @@
 import { GRID_SIZE, FLOOR_HEIGHT } from '@/lib/constants/grid';
 
-/** Convert world position (meters) to grid position */
+/** Convert world position (meters) to grid position (always snapped) */
 export function worldToGrid(worldX: number, worldZ: number, offsetX = 0, offsetZ = 0): { gridX: number; gridZ: number } {
   return {
     gridX: Math.round((worldX - offsetX) / GRID_SIZE),
     gridZ: Math.round((worldZ - offsetZ) / GRID_SIZE),
   };
+}
+
+/** Convert world position to grid position with optional snap */
+export function worldToGridSnapped(
+  worldX: number, worldZ: number,
+  offsetX: number, offsetZ: number,
+  snap: boolean,
+): { gridX: number; gridZ: number } {
+  const rawX = (worldX - offsetX) / GRID_SIZE;
+  const rawZ = (worldZ - offsetZ) / GRID_SIZE;
+  return snap
+    ? { gridX: Math.round(rawX), gridZ: Math.round(rawZ) }
+    : { gridX: rawX, gridZ: rawZ };
 }
 
 /** Convert grid position to world position (center of cell) */
@@ -35,7 +48,7 @@ export function getOccupiedCells(
   gridZ: number,
   gridWidth: number,
   gridDepth: number,
-  rotation: 0 | 90 | 180 | 270,
+  rotation: number,
 ): Array<{ x: number; z: number }> {
   const cells: Array<{ x: number; z: number }> = [];
 
@@ -56,7 +69,7 @@ export function getOccupiedCells(
 export function getRotatedDimensions(
   gridWidth: number,
   gridDepth: number,
-  rotation: 0 | 90 | 180 | 270,
+  rotation: number,
 ): { width: number; depth: number } {
   if (rotation === 90 || rotation === 270) {
     return { width: gridDepth, depth: gridWidth };

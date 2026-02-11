@@ -57,7 +57,7 @@ export interface SpeckleModel {
 export interface SpeckleExportModule {
   name: string;
   position: [number, number, number]; // Y-up world coords
-  rotation: 0 | 90 | 180 | 270;
+  rotation: number;
   dimensions: [number, number, number]; // width, height, depth
   color: string; // hex (#RRGGBB)
   /** Speckle 커스텀 모듈이면 메시 데이터 포함 */

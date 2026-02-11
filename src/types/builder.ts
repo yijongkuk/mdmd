@@ -50,7 +50,7 @@ export interface ModulePlacement {
   gridX: number;
   gridY: number;
   gridZ: number;
-  rotation: 0 | 90 | 180 | 270;
+  rotation: number;
   floor: number;
   materialId?: string;
   customColor?: string;

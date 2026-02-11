@@ -8,12 +8,10 @@ import { recentlyClickedModule } from './PlacedModule';
 import { recentlyDragged } from './ModuleDragger';
 import { isGridDragging } from './BuildableVolume';
 import { getModuleById } from '@/lib/constants/modules';
-import { GRID_SIZE } from '@/lib/constants/grid';
 import {
-  gridToWorld,
   floorToWorldY,
-  getRotatedDimensions,
 } from '@/features/builder/utils/gridUtils';
+import { placementToOBB, obbCorners } from '@/features/builder/utils/obbCollision';
 
 /** Timestamp of last box select end — used to suppress click-deselect */
 let _boxSelectEndTime = 0;
@@ -84,15 +82,22 @@ export function BoxSelect({ parcelOffset = { x: 0, z: 0 } }: BoxSelectProps) {
     const onPointerDown = (e: PointerEvent) => {
       if (latestRef.current.activeTool !== 'select') return;
       if (e.button !== 0) return;
-      // 모듈 드래그 또는 그리드 이동 중이면 박스 선택 시작하지 않음
+      // 모듈 드래그 중이면 박스 선택 시작하지 않음
       if (latestRef.current.draggingPlacementId || isGridDragging()) return;
 
-      stateRef.current = {
-        isTracking: true,
-        isBoxSelecting: false,
-        startX: e.clientX,
-        startY: e.clientY,
-      };
+      // Defer tracking to let R3F event handlers fire first
+      // (R3F's onPointerDown in BuildableVolume sets _gridDragging)
+      const startX = e.clientX;
+      const startY = e.clientY;
+      queueMicrotask(() => {
+        if (isGridDragging()) return;
+        stateRef.current = {
+          isTracking: true,
+          isBoxSelecting: false,
+          startX,
+          startY,
+        };
+      });
     };
 
     const onPointerMove = (e: PointerEvent) => {
@@ -170,35 +175,27 @@ export function BoxSelect({ parcelOffset = { x: 0, z: 0 } }: BoxSelectProps) {
           const mod = getModuleById(p.moduleId);
           if (!mod) continue;
 
-          const { width: rotW, depth: rotD } = getRotatedDimensions(
-            mod.gridWidth,
-            mod.gridDepth,
-            p.rotation,
+          const obb = placementToOBB(
+            p.gridX, p.gridZ, mod.gridWidth, mod.gridDepth,
+            p.rotation, gridOffset.x, gridOffset.z,
           );
-          const wp = gridToWorld(p.gridX, p.gridZ, gridOffset.x, gridOffset.z);
-
-          // Scene-space box corners (accounting for Z-mirror and offsets)
-          const xMin = wp.x + po.x;
-          const xMax = wp.x + rotW * GRID_SIZE + po.x;
+          const baseCorners = obbCorners(obb); // 4 XZ corners
           const yMin = floorToWorldY(p.floor) + terrainBaseY;
           const yMax = yMin + mod.height;
-          const zMin = -(wp.z + rotD * GRID_SIZE + po.z); // Z mirror
-          const zMax = -(wp.z + po.z);
 
-          // Project all 8 corners → find screen-space bounding box
+          // Project all 8 corners (4 base × 2 heights) → find screen-space bounding box
           let sxMin = Infinity, sxMax = -Infinity;
           let syMin = Infinity, syMax = -Infinity;
-          for (const cx of [xMin, xMax]) {
+          for (const c of baseCorners) {
             for (const cy of [yMin, yMax]) {
-              for (const cz of [zMin, zMax]) {
-                vec.set(cx, cy, cz).project(cam);
-                const sx = (vec.x * 0.5 + 0.5) * elRect.width;
-                const sy = (-vec.y * 0.5 + 0.5) * elRect.height;
-                if (sx < sxMin) sxMin = sx;
-                if (sx > sxMax) sxMax = sx;
-                if (sy < syMin) syMin = sy;
-                if (sy > syMax) syMax = sy;
-              }
+              // Scene-space: X = c.x + po.x, Z = -(c.z + po.z) (Z mirror)
+              vec.set(c.x + po.x, cy, -(c.z + po.z)).project(cam);
+              const sx = (vec.x * 0.5 + 0.5) * elRect.width;
+              const sy = (-vec.y * 0.5 + 0.5) * elRect.height;
+              if (sx < sxMin) sxMin = sx;
+              if (sx > sxMax) sxMax = sx;
+              if (sy < syMin) syMin = sy;
+              if (sy > syMax) syMax = sy;
             }
           }
 

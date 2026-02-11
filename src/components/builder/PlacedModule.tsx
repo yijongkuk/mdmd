@@ -6,7 +6,7 @@ import { ThreeEvent, useFrame } from '@react-three/fiber';
 import { Edges } from '@react-three/drei';
 import { ModulePlacement, ModuleDefinition } from '@/types/builder';
 import { getMaterialById } from '@/lib/constants/materials';
-import { gridToWorld, floorToWorldY, getRotatedDimensions } from '@/features/builder/utils/gridUtils';
+import { gridToWorld, floorToWorldY } from '@/features/builder/utils/gridUtils';
 import { GRID_SIZE } from '@/lib/constants/grid';
 import { useBuilderStore } from '@/features/builder/store';
 import { getMeshData } from '@/lib/speckle/customModules';
@@ -40,24 +40,26 @@ export function PlacedModule({ placement, module, isSelected, isCurrentFloor }: 
   const isDragging = draggingPlacementId === placement.id
     || (!!draggingPlacementId && isSelected && selectedPlacementIds.includes(draggingPlacementId));
 
-  // Calculate world position
-  const { width: rotW, depth: rotD } = getRotatedDimensions(
-    module.gridWidth,
-    module.gridDepth,
-    placement.rotation,
-  );
+  // Calculate world position — real Y-axis rotation for all modules
   const worldPos = gridToWorld(placement.gridX, placement.gridZ, gridOffset.x, gridOffset.z);
   const worldY = floorToWorldY(placement.floor);
 
-  // Module real dimensions after rotation
-  const realWidth = rotW * GRID_SIZE;
-  const realDepth = rotD * GRID_SIZE;
+  // Original (unrotated) dimensions
+  const realWidth = module.gridWidth * GRID_SIZE;
+  const realDepth = module.gridDepth * GRID_SIZE;
   const realHeight = module.height;
 
-  // Position at center of the module footprint, with Y offset to sit on the floor
-  const posX = worldPos.x + realWidth / 2;
+  // Rotation around Y axis
+  const rotationY = (placement.rotation * Math.PI) / 180;
+  const cos = Math.cos(rotationY);
+  const sin = Math.sin(rotationY);
+
+  // Unrotated local center → rotate around grid origin
+  const localCx = realWidth / 2;
+  const localCz = realDepth / 2;
+  const posX = worldPos.x + localCx * cos - localCz * sin;
   const posY = worldY + realHeight / 2;
-  const posZ = worldPos.z + realDepth / 2;
+  const posZ = worldPos.z + localCx * sin + localCz * cos;
 
   // Determine base color (from module definition / material — doesn't change with selection)
   let baseColor = module.color;
@@ -110,9 +112,6 @@ export function PlacedModule({ placement, module, isSelected, isCurrentFloor }: 
     geom.computeVertexNormals();
     return geom;
   }, [module.id, module.speckleRef]);
-
-  // Speckle 모듈 회전 (BoxGeometry는 width/depth 스왑으로 처리, custom은 실제 회전)
-  const rotationY = module.speckleRef ? (placement.rotation * Math.PI) / 180 : 0;
 
   // Imperative visual sync — reads Zustand store directly every GL frame.
   // Bypasses React's async scheduling so selection/drag changes appear instantly,
@@ -206,7 +205,7 @@ export function PlacedModule({ placement, module, isSelected, isCurrentFloor }: 
     <mesh
       ref={meshRef}
       position={[posX, posY, posZ]}
-      rotation={rotationY ? [0, rotationY, 0] : undefined}
+      rotation={[0, rotationY, 0]}
       {...(isCurrentFloor && {
         onPointerDown: handlePointerDown,
       })}

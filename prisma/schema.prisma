@@ -47,11 +47,11 @@ model ModulePlacement {
 
   moduleId String // 모듈 정의 ID (클라이언트 상수 참조, FK 없음)
 
-  gridX Int // 그리드 X 위치
-  gridY Int // 그리드 Y 위치 (층 높이)
-  gridZ Int // 그리드 Z 위치
+  gridX Float // 그리드 X 위치
+  gridY Float // 그리드 Y 위치 (층 높이)
+  gridZ Float // 그리드 Z 위치
 
-  rotation Int @default(0) // 0, 90, 180, 270
+  rotation Float @default(0) // 0~345 (15도 단위)
   floor    Int @default(1) // 층
 
   materialId  String? // 재질 ID (클라이언트 상수 참조)

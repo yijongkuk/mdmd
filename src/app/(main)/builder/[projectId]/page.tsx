@@ -61,8 +61,8 @@ export default function BuilderPage() {
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
-  const [appraisalValue, setAppraisalValue] = useState(0);
-  const [minBidPrice, setMinBidPrice] = useState(0);
+  const [appraisalValue, setAppraisalValue] = useState(queryAppraisal);
+  const [minBidPrice, setMinBidPrice] = useState(queryMinBid);
   // effectivePnu: URL 쿼리 우선, 없으면 DB에서 로드한 값 사용
   const [dbParcelPnu, setDbParcelPnu] = useState<string | null>(null);
   const effectivePnu = parcelPnu ?? dbParcelPnu;
@@ -189,7 +189,7 @@ export default function BuilderPage() {
             gridX: p.gridX as number,
             gridY: p.gridY as number,
             gridZ: p.gridZ as number,
-            rotation: (p.rotation ?? 0) as 0 | 90 | 180 | 270,
+            rotation: (p.rotation ?? 0) as number,
             floor: (p.floor ?? 1) as number,
             materialId: (p.materialId as string) ?? undefined,
             customColor: (p.customColor as string) ?? undefined,

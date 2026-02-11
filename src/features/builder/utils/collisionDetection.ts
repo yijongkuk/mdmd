@@ -28,13 +28,13 @@ export function createOccupancyMap(
   return map;
 }
 
-/** Check if any cell of the module falls outside the buildable grid bounds */
+/** Check if any cell of the module falls outside the buildable grid bounds (rectangle) */
 export function checkOutOfBounds(
   gridX: number,
   gridZ: number,
   gridWidth: number,
   gridDepth: number,
-  rotation: 0 | 90 | 180 | 270,
+  rotation: number,
   bounds: { minGridX: number; maxGridX: number; minGridZ: number; maxGridZ: number },
 ): boolean {
   const cells = getOccupiedCells(gridX, gridZ, gridWidth, gridDepth, rotation);
@@ -51,6 +51,19 @@ export function checkOutOfBounds(
   return false;
 }
 
+/** Check if any cell of the module falls outside the allowed cell set (arbitrary shape) */
+export function checkOutOfBoundsCells(
+  gridX: number,
+  gridZ: number,
+  gridWidth: number,
+  gridDepth: number,
+  rotation: number,
+  allowedCells: Set<string>,
+): boolean {
+  const cells = getOccupiedCells(gridX, gridZ, gridWidth, gridDepth, rotation);
+  return cells.some(c => !allowedCells.has(`${c.x}:${c.z}`));
+}
+
 /** Check if placing a module at the given position causes any collision */
 export function checkCollision(
   occupancyMap: OccupancyMap,
@@ -59,7 +72,7 @@ export function checkCollision(
   floor: number,
   gridWidth: number,
   gridDepth: number,
-  rotation: 0 | 90 | 180 | 270,
+  rotation: number,
   excludePlacementId?: string,
 ): { hasCollision: boolean; conflictingIds: string[] } {
   const cells = getOccupiedCells(gridX, gridZ, gridWidth, gridDepth, rotation);

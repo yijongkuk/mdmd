@@ -6,6 +6,7 @@ import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import * as THREE from 'three';
 import { useBuilderStore, type FloorAreaInfo } from '@/features/builder/store';
 import { getModuleById } from '@/lib/constants/modules';
+import { GRID_SIZE } from '@/lib/constants/grid';
 import { BuilderGrid } from './BuilderGrid';
 import { ParcelGrid } from './ParcelGrid';
 import { ParcelBoundary } from './ParcelBoundary';
@@ -22,7 +23,7 @@ import { TerrainMesh, type TerrainElevationGrid } from './TerrainMesh';
 import { SurroundingBuildings } from './SurroundingBuildings';
 import { SurroundingRoads } from './SurroundingRoads';
 import { geoJsonRingToLocal, wgs84ToLocal } from '@/lib/geo/coordTransform';
-import { polygonInset, polygonBounds, polygonSignedArea, maxInscribedRect } from '@/lib/geo/polygonClip';
+import { polygonInset, polygonBounds, polygonSignedArea, gridCellsInPolygon } from '@/lib/geo/polygonClip';
 import type { ParcelInfo, SurroundingBuilding, SurroundingRoad } from '@/types/land';
 import type { LocalPoint } from '@/lib/geo/coordTransform';
 
@@ -181,8 +182,10 @@ function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showS
   const visibleFloors = useBuilderStore((s) => s.visibleFloors);
   const selectedPlacementIds = useBuilderStore((s) => s.selectedPlacementIds);
   const gridOffset = useBuilderStore((s) => s.gridOffset);
+  const gridSnap = useBuilderStore((s) => s.gridSnap);
   const terrainBaseY = useBuilderStore((s) => s.terrainBaseY);
   const setTerrainBaseY = useBuilderStore((s) => s.setTerrainBaseY);
+  const setMaxFloors = useBuilderStore((s) => s.setMaxFloors);
 
   const visiblePlacements = placements.filter((p) => visibleFloors.includes(p.floor));
 
@@ -208,49 +211,43 @@ function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showS
     return inset.length >= 3 ? inset : null;
   }, [parcelPolygon]);
 
-  // Compute buildable footprint as RECTANGLE (건폐율) and volume height (용적률)
-  const { buildablePolygon, volumeHeight } = useMemo(() => {
-    if (!regulationPolygon || !parcelInfo) return { buildablePolygon: null, volumeHeight: 0 };
+  // Compute buildable volume:
+  //   buildablePolygon = 건폐율 스케일된 폴리곤 (와이어프레임용, 대지 형태 유지)
+  //   buildableCells = regulationPolygon 내 셀 집합 (충돌 검사용, 이형 대지 지원)
+  //   volumeHeight = 용적률 ÷ 건폐율 → 층수 → 높이
+  const { buildablePolygon, buildableCells, volumeHeight, effectiveFloors } = useMemo(() => {
+    if (!regulationPolygon || !parcelInfo) return { buildablePolygon: null, buildableCells: null, volumeHeight: 0, effectiveFloors: 0 };
 
     const reg = parcelInfo.regulation;
     const maxCoverage = reg?.maxCoverageRatio ?? 60;
     const maxFAR = reg?.maxFloorAreaRatio ?? 200;
     const maxFootprint = parcelInfo.area * maxCoverage / 100;
 
-    // Find the largest axis-aligned rectangle inscribed in the setback polygon
-    const rect = maxInscribedRect(regulationPolygon);
-    const rectWidth = rect.maxX - rect.minX;
-    const rectDepth = rect.maxZ - rect.minZ;
-    const rectArea = rectWidth * rectDepth;
+    // 1. Cells within regulation polygon — for collision detection (handles concave parcels)
+    const cells = gridCellsInPolygon(regulationPolygon, GRID_SIZE, gridOffset.x, gridOffset.z);
 
-    // Scale rectangle down if it exceeds 건폐율 limit (shrink from center)
-    let finalWidth = rectWidth;
-    let finalDepth = rectDepth;
-    let footprintArea: number;
-    if (rectArea > maxFootprint) {
-      const scale = Math.sqrt(maxFootprint / rectArea);
-      finalWidth = rectWidth * scale;
-      finalDepth = rectDepth * scale;
+    // 2. Regulation polygon area (signed area → absolute)
+    const regArea = Math.abs(polygonSignedArea(regulationPolygon));
+
+    // 3. Scale polygon from centroid if area exceeds 건폐율 limit
+    let footprint = regulationPolygon;
+    let footprintArea = regArea;
+    if (regArea > maxFootprint) {
+      const scale = Math.sqrt(maxFootprint / regArea);
+      // Compute centroid
+      let cx = 0, cz = 0;
+      for (const p of regulationPolygon) { cx += p.x; cz += p.z; }
+      cx /= regulationPolygon.length;
+      cz /= regulationPolygon.length;
+      // Scale each vertex toward centroid
+      footprint = regulationPolygon.map(p => ({
+        x: cx + (p.x - cx) * scale,
+        z: cz + (p.z - cz) * scale,
+      }));
       footprintArea = maxFootprint;
-    } else {
-      footprintArea = rectArea;
     }
 
-    // Center of the inscribed rectangle
-    const cx = (rect.minX + rect.maxX) / 2;
-    const cz = (rect.minZ + rect.maxZ) / 2;
-    const hw = finalWidth / 2;
-    const hd = finalDepth / 2;
-
-    // Build rectangular footprint as 4-point polygon
-    const footprint: LocalPoint[] = [
-      { x: cx - hw, z: cz - hd },
-      { x: cx + hw, z: cz - hd },
-      { x: cx + hw, z: cz + hd },
-      { x: cx - hw, z: cz + hd },
-    ];
-
-    // Volume height — 용적률 ÷ 건폐율 = 층수, capped by zone limits
+    // 4. Volume height — 용적률 ÷ 건폐율 = 층수, capped by zone limits
     const maxTotalFloorArea = parcelInfo.area * maxFAR / 100;
     const floorsFromFAR = Math.floor(maxTotalFloorArea / footprintArea);
     const maxFloors = reg?.maxFloors ?? 0;
@@ -260,8 +257,13 @@ function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showS
     const effectiveFloors = Math.min(floorsFromFAR, floorsCap, heightCap);
     const height = effectiveFloors * 3;
 
-    return { buildablePolygon: footprint, volumeHeight: height };
-  }, [regulationPolygon, parcelInfo]);
+    return { buildablePolygon: footprint, buildableCells: cells, volumeHeight: height, effectiveFloors };
+  }, [regulationPolygon, parcelInfo, gridOffset]);
+
+  // Sync effective floors to store so FloorNavigator shows correct count
+  useEffect(() => {
+    if (effectiveFloors > 0) setMaxFloors(effectiveFloors);
+  }, [effectiveFloors, setMaxFloors]);
 
   // Compute per-floor areas (with solar clipping) and push to store
   const setFloorAreas = useBuilderStore((s) => s.setFloorAreas);
@@ -275,6 +277,7 @@ function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showS
   const floorAreas = useMemo<FloorAreaInfo[]>(() => {
     if (!buildablePolygon || volumeHeight <= 0) return [];
 
+    const baseArea = Math.abs(polygonSignedArea(buildablePolygon));
     let minX = Infinity, maxX = -Infinity;
     let minZ = Infinity, maxZ = -Infinity;
     for (const p of buildablePolygon) {
@@ -283,6 +286,7 @@ function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showS
       if (p.z < minZ) minZ = p.z;
       if (p.z > maxZ) maxZ = p.z;
     }
+    const fullDepth = maxZ - minZ;
 
     const FLOOR_H = 3;
     const numFloors = Math.floor(volumeHeight / FLOOR_H);
@@ -297,7 +301,9 @@ function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showS
       if (clippedMaxZ <= minZ) break;
       const w = maxX - minX;
       const d = clippedMaxZ - minZ;
-      areas.push({ floor: f, area: w * d, width: w, depth: d });
+      // Solar-clipped area: proportional to depth reduction
+      const area = clippedMaxZ < maxZ ? baseArea * (d / fullDepth) : baseArea;
+      areas.push({ floor: f, area, width: w, depth: d });
     }
     return areas;
   }, [buildablePolygon, volumeHeight, solarNorthZ]);
@@ -496,20 +502,20 @@ function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showS
 
           {/* Parcel elements — offset to align with surrounding context */}
           <group position={[parcelOffset.x, 0, parcelOffset.z]}>
-            {/* Grid — aligned to buildable rectangle, or parcel, or fallback */}
-            {buildablePolygon ? (
+            {/* Grid — aligned to buildable polygon, or parcel, or fallback */}
+            {buildablePolygon && gridSnap ? (
               <>
                 <ParcelGrid polygon={buildablePolygon} floor={currentFloor} offset={gridOffset} />
                 {parcelPolygon && <ParcelBoundary polygon={parcelPolygon} />}
               </>
             ) : parcelPolygon ? (
               <>
-                <ParcelGrid polygon={parcelPolygon} floor={currentFloor} offset={gridOffset} />
+                {gridSnap && <ParcelGrid polygon={parcelPolygon} floor={currentFloor} offset={gridOffset} />}
                 <ParcelBoundary polygon={parcelPolygon} />
               </>
-            ) : (
+            ) : gridSnap ? (
               <BuilderGrid floor={currentFloor} />
-            )}
+            ) : null}
 
             {/* Ground plane — visible only without terrain */}
             <mesh
@@ -541,10 +547,10 @@ function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showS
             })}
 
             {/* Ghost module for placement preview */}
-            <GhostModule parcelOffset={parcelOffset} buildablePolygon={buildablePolygon} />
+            <GhostModule parcelOffset={parcelOffset} buildablePolygon={regulationPolygon} />
 
             {/* Drag-to-move ghost for selected modules */}
-            <ModuleDragger buildablePolygon={buildablePolygon} />
+            <ModuleDragger buildablePolygon={regulationPolygon} />
 
             {/* Box select (drag rectangle to select multiple modules) */}
             <BoxSelect parcelOffset={parcelOffset} />

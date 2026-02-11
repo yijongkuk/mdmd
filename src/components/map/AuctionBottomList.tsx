@@ -146,9 +146,22 @@ const AuctionCard = memo(function AuctionCard({
           {property.status}
         </Badge>
       </div>
-      <p className="mt-1 text-sm font-bold text-red-600">
-        {formatWon(property.minBidPrice)}
-      </p>
+      {property.appraisalValue > 0 && property.appraisalValue !== property.minBidPrice ? (
+        <div className="mt-1">
+          <div className="flex items-baseline gap-1.5">
+            <p className="text-sm font-bold text-red-600">
+              {formatWon(property.minBidPrice)}
+            </p>
+            <p className="text-[10px] text-slate-400 line-through">
+              {formatWon(property.appraisalValue)}
+            </p>
+          </div>
+        </div>
+      ) : (
+        <p className="mt-1 text-sm font-bold text-red-600">
+          {formatWon(property.appraisalValue > 0 ? property.appraisalValue : property.minBidPrice)}
+        </p>
+      )}
     </button>
   );
 });

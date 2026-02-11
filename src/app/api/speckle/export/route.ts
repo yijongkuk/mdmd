@@ -24,24 +24,41 @@ function toZUp(x: number, y: number, z: number): [number, number, number] {
   return [x, -z, y];
 }
 
-/** BoxGeometry 12 삼각형 메시 생성 (Z-up, CCW 와인딩) */
+/** BoxGeometry 12 삼각형 메시 생성 (Z-up, CCW 와인딩, 회전 적용) */
 function createBoxMesh(
   w: number, h: number, d: number,
   posX: number, posY: number, posZ: number,
   color: string,
+  rotationDeg: number = 0,
 ) {
-  const x0 = posX, x1 = posX + w;
-  const y0 = posY, y1 = posY + h;
-  const z0 = posZ, z1 = posZ + d;
-
-  const corners = [
-    [x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0],
-    [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1],
+  // Local corners centered at origin
+  const hw = w / 2, hh = h / 2, hd = d / 2;
+  const localCorners: [number, number, number][] = [
+    [-hw, -hh, -hd], [hw, -hh, -hd], [hw, hh, -hd], [-hw, hh, -hd],
+    [-hw, -hh, hd],  [hw, -hh, hd],  [hw, hh, hd],  [-hw, hh, hd],
   ];
 
-  const v = corners.map(([cx, cy, cz]) => toZUp(cx, cy, cz));
+  // Apply Y-axis rotation (in Y-up space)
+  const rad = (rotationDeg * Math.PI) / 180;
+  const cosR = Math.cos(rad);
+  const sinR = Math.sin(rad);
+
+  // Compute rotated center (same logic as PlacedModule)
+  const localCx = w / 2;
+  const localCz = d / 2;
+  const cx = posX + localCx * cosR - localCz * sinR;
+  const cy = posY + hh;
+  const cz = posZ + localCx * sinR + localCz * cosR;
+
   const vertices: number[] = [];
-  for (const [vx, vy, vz] of v) vertices.push(vx, vy, vz);
+  for (const [lx, ly, lz] of localCorners) {
+    // Rotate around Y axis, then translate to world center
+    const rx = lx * cosR - lz * sinR + cx;
+    const ry = ly + cy;
+    const rz = lx * sinR + lz * cosR + cz;
+    const [sx, sy, sz] = toZUp(rx, ry, rz);
+    vertices.push(sx, sy, sz);
+  }
 
   // 삼각형 면 (type=0), CCW 와인딩 — 법선이 바깥쪽을 향함
   const faces = [
@@ -187,6 +204,7 @@ export async function POST(request: Request) {
           w, h, d,
           mod.position[0], mod.position[1], mod.position[2],
           mod.color,
+          mod.rotation,
         );
       }
 

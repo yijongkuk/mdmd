@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
 import { ModulePlacement, BuilderTool } from '@/types/builder';
+import { ROTATION_STEP } from '@/lib/constants/grid';
+import { getModuleById } from '@/lib/constants/modules';
 
 const MAX_UNDO_STEPS = 50;
 
@@ -28,6 +30,7 @@ interface BuilderStore {
   gridOffset: { x: number; z: number };
   terrainBaseY: number;
   showSurrounding: boolean;
+  gridSnap: boolean;
   gridLocked: boolean;
   toastMessage: string | null;
   toastType: 'info' | 'error';
@@ -53,7 +56,7 @@ interface BuilderStore {
   removePlacement: (id: string) => void;
   movePlacement: (id: string, gridX: number, gridY: number, gridZ: number) => void;
   movePlacements: (moves: Array<{ id: string; gridX: number; gridZ: number }>) => void;
-  rotatePlacement: (id: string) => void;
+  rotatePlacement: (id: string, direction?: 1 | -1) => void;
   updatePlacementMaterial: (id: string, materialId: string, customColor?: string) => void;
   startDrag: (id: string, offsetX: number, offsetZ: number) => void;
   endDrag: () => void;
@@ -65,6 +68,7 @@ interface BuilderStore {
   setFloorAreas: (areas: FloorAreaInfo[]) => void;
   setTerrainBaseY: (y: number) => void;
   toggleSurrounding: () => void;
+  toggleGridSnap: () => void;
   toggleGridLock: () => void;
   showToast: (message: string, type?: 'info' | 'error') => void;
   setBoxSelectRect: (rect: { x1: number; y1: number; x2: number; y2: number; crossing: boolean } | null) => void;
@@ -101,6 +105,7 @@ export const useBuilderStore = create<BuilderStore>((set) => ({
   gridOffset: { x: 0, z: 0 },
   terrainBaseY: 0,
   showSurrounding: true,
+  gridSnap: true,
   gridLocked: true,
   toastMessage: null,
   toastType: 'info' as const,
@@ -205,16 +210,43 @@ export const useBuilderStore = create<BuilderStore>((set) => ({
       };
     }),
 
-  rotatePlacement: (id) =>
-    set((state) => ({
-      placements: state.placements.map((p) =>
-        p.id === id
-          ? { ...p, rotation: ((p.rotation + 90) % 360) as 0 | 90 | 180 | 270 }
-          : p,
-      ),
-      undoStack: pushUndo(state.undoStack, state.placements),
-      redoStack: [],
-    })),
+  rotatePlacement: (id, direction = 1) =>
+    set((state) => {
+      const p = state.placements.find((pl) => pl.id === id);
+      if (!p) return state;
+      const mod = getModuleById(p.moduleId);
+      if (!mod) return state;
+
+      const oldRot = p.rotation;
+      const newRot = (oldRot + ROTATION_STEP * direction + 360) % 360;
+
+      // Center-preserving rotation: compute gridX/gridZ so the center stays fixed
+      const hw = mod.gridWidth / 2; // half-width in grid units
+      const hd = mod.gridDepth / 2; // half-depth in grid units
+
+      const oldRad = (oldRot * Math.PI) / 180;
+      const newRad = (newRot * Math.PI) / 180;
+      const oldCos = Math.cos(oldRad), oldSin = Math.sin(oldRad);
+      const newCos = Math.cos(newRad), newSin = Math.sin(newRad);
+
+      // Old center in grid units
+      const cx = p.gridX + hw * oldCos - hd * oldSin;
+      const cz = p.gridZ + hw * oldSin + hd * oldCos;
+
+      // New origin so center stays the same
+      const newGridX = cx - (hw * newCos - hd * newSin);
+      const newGridZ = cz - (hw * newSin + hd * newCos);
+
+      return {
+        placements: state.placements.map((pl) =>
+          pl.id === id
+            ? { ...pl, rotation: newRot, gridX: newGridX, gridZ: newGridZ }
+            : pl,
+        ),
+        undoStack: pushUndo(state.undoStack, state.placements),
+        redoStack: [],
+      };
+    }),
 
   startDrag: (id, offsetX, offsetZ) => set({ draggingPlacementId: id, dragOffset: { x: offsetX, z: offsetZ } }),
   endDrag: () => set({ draggingPlacementId: null, dragOffset: null }),
@@ -223,6 +255,7 @@ export const useBuilderStore = create<BuilderStore>((set) => ({
   setFloorAreas: (areas) => set({ floorAreas: areas }),
   setTerrainBaseY: (y) => set({ terrainBaseY: y }),
   toggleSurrounding: () => set((state) => ({ showSurrounding: !state.showSurrounding })),
+  toggleGridSnap: () => set((state) => ({ gridSnap: !state.gridSnap })),
   toggleGridLock: () => set((state) => ({ gridLocked: !state.gridLocked })),
   showToast: (message, type = 'error') => {
     set({ toastMessage: message, toastType: type });

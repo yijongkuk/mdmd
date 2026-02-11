@@ -7,19 +7,18 @@ import { Edges } from '@react-three/drei';
 import { useBuilderStore } from '@/features/builder/store';
 import { getModuleById } from '@/lib/constants/modules';
 import { getMeshData } from '@/lib/speckle/customModules';
-import { GRID_SIZE } from '@/lib/constants/grid';
+import { GRID_SIZE, ROTATION_STEP } from '@/lib/constants/grid';
 import {
-  worldToGrid,
+  worldToGridSnapped,
   gridToWorld,
   floorToWorldY,
-  getRotatedDimensions,
 } from '@/features/builder/utils/gridUtils';
 import {
-  createOccupancyMap,
-  checkCollision,
-  checkOutOfBounds,
-} from '@/features/builder/utils/collisionDetection';
-import type { LocalPoint } from '@/lib/geo/coordTransform';
+  placementToOBB,
+  checkOBBCollision,
+  checkOBBInBounds,
+} from '@/features/builder/utils/obbCollision';
+import type { LocalPoint } from '@/features/builder/utils/obbCollision';
 
 interface GhostModuleProps {
   parcelOffset?: { x: number; z: number };
@@ -33,12 +32,12 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
   const placements = useBuilderStore((s) => s.placements);
   const addPlacement = useBuilderStore((s) => s.addPlacement);
   const gridOffset = useBuilderStore((s) => s.gridOffset);
+  const gridSnap = useBuilderStore((s) => s.gridSnap);
   const showToast = useBuilderStore((s) => s.showToast);
-  // Note: terrainBaseY not needed — parent group already provides it
 
   const [ghostPos, setGhostPos] = useState<{ gridX: number; gridZ: number } | null>(null);
   const [hasCollision, setHasCollision] = useState(false);
-  const [ghostRotation, setGhostRotation] = useState<0 | 90 | 180 | 270>(0);
+  const [ghostRotation, setGhostRotation] = useState<number>(0);
   // Track pointerDown screen position to distinguish click vs drag (orbit)
   const pointerDownRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -62,7 +61,8 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
 
       if ((e.key.toLowerCase() === 'r' || e.key === ' ') && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        setGhostRotation((prev) => ((prev + 90) % 360) as 0 | 90 | 180 | 270);
+        const step = e.key === ' ' ? ROTATION_STEP : -ROTATION_STEP;
+        setGhostRotation((prev) => (prev + step + 360) % 360);
       }
     };
 
@@ -70,28 +70,21 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [activeTool, moduleDef]);
 
-  const occupancyMap = useMemo(
-    () => createOccupancyMap(placements, getModuleById),
-    [placements],
+  // Helper: compute corner gridX/gridZ from center gridX/gridZ
+  const centerToCorner = useCallback(
+    (centerGX: number, centerGZ: number, rot: number) => {
+      if (!moduleDef) return { gridX: centerGX, gridZ: centerGZ };
+      const hw = moduleDef.gridWidth / 2;
+      const hd = moduleDef.gridDepth / 2;
+      const rad = (rot * Math.PI) / 180;
+      const cos = Math.cos(rad), sin = Math.sin(rad);
+      return {
+        gridX: centerGX - (hw * cos - hd * sin),
+        gridZ: centerGZ - (hw * sin + hd * cos),
+      };
+    },
+    [moduleDef],
   );
-
-  // Convert buildable polygon bounds to grid coordinate bounds
-  const buildableGridBounds = useMemo(() => {
-    if (!buildablePolygon || buildablePolygon.length < 3) return null;
-    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    for (const p of buildablePolygon) {
-      if (p.x < minX) minX = p.x;
-      if (p.x > maxX) maxX = p.x;
-      if (p.z < minZ) minZ = p.z;
-      if (p.z > maxZ) maxZ = p.z;
-    }
-    return {
-      minGridX: Math.ceil((minX - gridOffset.x) / GRID_SIZE),
-      maxGridX: Math.floor((maxX - gridOffset.x) / GRID_SIZE) - 1,
-      minGridZ: Math.ceil((minZ - gridOffset.z) / GRID_SIZE),
-      maxGridZ: Math.floor((maxZ - gridOffset.z) / GRID_SIZE) - 1,
-    };
-  }, [buildablePolygon, gridOffset]);
 
   const handlePointerMove = useCallback(
     (e: ThreeEvent<PointerEvent>) => {
@@ -100,40 +93,35 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
 
       const point = e.point;
       // Convert world-space hit → local (parcelOffset group) space
-      // X: subtract parcelOffset (scale X = 1)
-      // Z: negate (scale Z = -1) then subtract parcelOffset
       const localX = point.x - parcelOffset.x;
       const localZ = -point.z - parcelOffset.z;
-      const grid = worldToGrid(localX, localZ, gridOffset.x, gridOffset.z);
 
+      // ghostPos = module CENTER in grid coordinates
+      const grid = worldToGridSnapped(localX, localZ, gridOffset.x, gridOffset.z, gridSnap);
       setGhostPos({ gridX: grid.gridX, gridZ: grid.gridZ });
 
-      const result = checkCollision(
-        occupancyMap,
-        grid.gridX,
-        grid.gridZ,
-        currentFloor,
-        moduleDef.gridWidth,
-        moduleDef.gridDepth,
-        ghostRotation,
+      // Compute corner for OBB collision
+      const corner = centerToCorner(grid.gridX, grid.gridZ, ghostRotation);
+      const obb = placementToOBB(
+        corner.gridX, corner.gridZ,
+        moduleDef.gridWidth, moduleDef.gridDepth,
+        ghostRotation, gridOffset.x, gridOffset.z,
       );
 
-      // Check if module extends outside the buildable area
+      const result = checkOBBCollision(
+        obb, currentFloor, placements, getModuleById,
+        gridOffset.x, gridOffset.z,
+      );
+
+      // Check if module extends outside the buildable polygon
       let outOfBounds = false;
-      if (buildableGridBounds) {
-        outOfBounds = checkOutOfBounds(
-          grid.gridX,
-          grid.gridZ,
-          moduleDef.gridWidth,
-          moduleDef.gridDepth,
-          ghostRotation,
-          buildableGridBounds,
-        );
+      if (buildablePolygon && buildablePolygon.length >= 3) {
+        outOfBounds = !checkOBBInBounds(obb, buildablePolygon);
       }
 
       setHasCollision(result.hasCollision || outOfBounds);
     },
-    [activeTool, moduleDef, currentFloor, occupancyMap, ghostRotation, gridOffset, parcelOffset, buildableGridBounds],
+    [activeTool, moduleDef, currentFloor, placements, ghostRotation, gridOffset, gridSnap, parcelOffset, buildablePolygon, centerToCorner],
   );
 
   const handlePointerDown = useCallback(
@@ -162,28 +150,25 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
         return;
       }
 
+      // Convert center → corner for storage
+      const corner = centerToCorner(ghostPos.gridX, ghostPos.gridZ, ghostRotation);
       addPlacement({
         moduleId: moduleDef.id,
-        gridX: ghostPos.gridX,
+        gridX: corner.gridX,
         gridY: 0,
-        gridZ: ghostPos.gridZ,
+        gridZ: corner.gridZ,
         rotation: ghostRotation,
         floor: currentFloor,
       });
     },
-    [activeTool, moduleDef, ghostPos, hasCollision, currentFloor, addPlacement, ghostRotation, showToast],
+    [activeTool, moduleDef, ghostPos, hasCollision, currentFloor, addPlacement, ghostRotation, showToast, centerToCorner],
   );
 
   if (activeTool !== 'place' || !moduleDef) return null;
 
   const worldY = floorToWorldY(currentFloor);
-  const { width: rotW, depth: rotD } = getRotatedDimensions(
-    moduleDef.gridWidth,
-    moduleDef.gridDepth,
-    ghostRotation,
-  );
-  const realWidth = rotW * GRID_SIZE;
-  const realDepth = rotD * GRID_SIZE;
+  const realWidth = moduleDef.gridWidth * GRID_SIZE;
+  const realDepth = moduleDef.gridDepth * GRID_SIZE;
   const realHeight = moduleDef.height;
 
   const ghostColor = hasCollision ? '#ef4444' : '#22c55e';
@@ -224,8 +209,8 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
     return geom;
   })() : null;
 
-  // Speckle 모듈은 실제 Y축 회전 적용 (BoxGeometry는 dimension swap으로 처리)
-  const rotationY = moduleDef.speckleRef ? (ghostRotation * Math.PI) / 180 : 0;
+  // Real Y-axis rotation for all modules (BoxGeometry + Speckle)
+  const rotationY = (ghostRotation * Math.PI) / 180;
 
   return (
     <>
@@ -242,18 +227,19 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
         <meshBasicMaterial transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
       </mesh>
 
-      {/* Ghost preview */}
+      {/* Ghost preview — ghostPos is the CENTER */}
       {ghostPos && (
         <group>
           {(() => {
+            // ghostPos = center in grid coords → world center directly
             const wp = gridToWorld(ghostPos.gridX, ghostPos.gridZ, gridOffset.x, gridOffset.z);
-            const posX = wp.x + realWidth / 2;
+            const posX = wp.x;
             const posY = worldY + realHeight / 2;
-            const posZ = wp.z + realDepth / 2;
+            const posZ = wp.z;
             return (
               <mesh
                 position={[posX, posY, posZ]}
-                rotation={rotationY ? [0, rotationY, 0] : undefined}
+                rotation={[0, rotationY, 0]}
               >
                 {customGeometry ? (
                   <primitive object={customGeometry} attach="geometry" />

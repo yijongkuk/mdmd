@@ -14,13 +14,23 @@ interface BuildableVolumeProps {
   solarNorthZ?: number;
 }
 
-interface FloorRect {
-  y: number;
-  floorNum: number;
-  minX: number;
-  maxX: number;
-  minZ: number;
-  maxZ: number;
+/** Clip a polygon outline to z <= maxZ using Sutherland-Hodgman */
+function clipPolygonNorth(polygon: LocalPoint[], maxZ: number): LocalPoint[] {
+  const result: LocalPoint[] = [];
+  const n = polygon.length;
+  for (let i = 0; i < n; i++) {
+    const curr = polygon[i];
+    const next = polygon[(i + 1) % n];
+    const currIn = curr.z <= maxZ;
+    const nextIn = next.z <= maxZ;
+
+    if (currIn) result.push(curr);
+    if (currIn !== nextIn) {
+      const t = (maxZ - curr.z) / (next.z - curr.z);
+      result.push({ x: curr.x + t * (next.x - curr.x), z: maxZ });
+    }
+  }
+  return result;
 }
 
 /** 그리드 드래그 중인지 동기적으로 확인 (BoxSelect에서 사용) */
@@ -118,67 +128,62 @@ export function BuildableVolume({ polygon, height, solarNorthZ }: BuildableVolum
     };
   }, [isDraggingGrid, setGridOffset]);
 
-  // Compute clipped floor rectangles
-  const floors = useMemo<FloorRect[]>(() => {
-    let minX = Infinity, maxX = -Infinity;
-    let minZ = Infinity, maxZ = -Infinity;
-    for (const p of polygon) {
-      if (p.x < minX) minX = p.x;
-      if (p.x > maxX) maxX = p.x;
-      if (p.z < minZ) minZ = p.z;
-      if (p.z > maxZ) maxZ = p.z;
-    }
+  type FloorEntry = { y: number; floorNum: number; poly: LocalPoint[]; minX: number; maxX: number; minZ: number; maxZ: number };
 
+  // Compute clipped floor data: polygon outline + bounding rect for each floor
+  const floors = useMemo<FloorEntry[]>(() => {
     const numFloors = Math.floor(height / FLOOR_HEIGHT);
-    const yLevels: number[] = [];
+    const result: FloorEntry[] = [];
+
     for (let f = 0; f <= numFloors; f++) {
       const y = f * FLOOR_HEIGHT;
-      if (y <= height) yLevels.push(y);
-    }
-    if (yLevels[yLevels.length - 1] < height) yLevels.push(height);
+      if (y > height) break;
+      const ceilingY = f < numFloors ? (f + 1) * FLOOR_HEIGHT : y;
 
-    const result: FloorRect[] = [];
-    for (let i = 0; i < yLevels.length; i++) {
-      const y = yLevels[i];
-      const ceilingY = i < yLevels.length - 1 ? yLevels[i + 1] : y;
-      let clippedMaxZ = maxZ;
+      let floorPoly = polygon;
       if (solarNorthZ != null && ceilingY > 9) {
-        clippedMaxZ = Math.min(maxZ, solarNorthZ - (ceilingY - 9) / 2);
+        const clippedMaxZ = solarNorthZ - (ceilingY - 9) / 2;
+        floorPoly = clipPolygonNorth(polygon, clippedMaxZ);
+        if (floorPoly.length < 3) break;
       }
-      if (clippedMaxZ <= minZ) break;
-      result.push({ y, floorNum: Math.round(y / FLOOR_HEIGHT) + 1, minX, maxX, minZ, maxZ: clippedMaxZ });
+
+      let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+      for (const p of floorPoly) {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.z < minZ) minZ = p.z;
+        if (p.z > maxZ) maxZ = p.z;
+      }
+
+      result.push({ y, floorNum: f + 1, poly: floorPoly, minX, maxX, minZ, maxZ });
     }
     return result;
   }, [polygon, height, solarNorthZ]);
 
-  // Wireframe
+  // Wireframe: polygon outline at each floor + vertical edges between floors
   const positions = useMemo(() => {
     if (floors.length === 0) return new Float32Array(0);
     const lines: number[] = [];
 
+    // Polygon outline at each floor level
     for (const f of floors) {
-      lines.push(f.minX, f.y, f.minZ, f.maxX, f.y, f.minZ);
-      lines.push(f.maxX, f.y, f.minZ, f.maxX, f.y, f.maxZ);
-      lines.push(f.maxX, f.y, f.maxZ, f.minX, f.y, f.maxZ);
-      lines.push(f.minX, f.y, f.maxZ, f.minX, f.y, f.minZ);
+      const n = f.poly.length;
+      for (let i = 0; i < n; i++) {
+        const p1 = f.poly[i];
+        const p2 = f.poly[(i + 1) % n];
+        lines.push(p1.x, f.y, p1.z, p2.x, f.y, p2.z);
+      }
     }
 
+    // Vertical edges between consecutive floors — polygon vertex verticals
     for (let i = 0; i < floors.length - 1; i++) {
       const curr = floors[i];
       const next = floors[i + 1];
-      lines.push(curr.minX, curr.y, curr.minZ, next.minX, next.y, next.minZ);
-      lines.push(curr.maxX, curr.y, curr.minZ, next.maxX, next.y, next.minZ);
 
-      const northChanged = Math.abs(curr.maxZ - next.maxZ) > 0.01;
-      if (northChanged) {
-        lines.push(curr.maxX, curr.y, curr.maxZ, curr.maxX, next.y, curr.maxZ);
-        lines.push(curr.minX, curr.y, curr.maxZ, curr.minX, next.y, curr.maxZ);
-        lines.push(curr.maxX, next.y, curr.maxZ, curr.maxX, next.y, next.maxZ);
-        lines.push(curr.minX, next.y, curr.maxZ, curr.minX, next.y, next.maxZ);
-        lines.push(curr.minX, next.y, curr.maxZ, curr.maxX, next.y, curr.maxZ);
-      } else {
-        lines.push(curr.maxX, curr.y, curr.maxZ, next.maxX, next.y, next.maxZ);
-        lines.push(curr.minX, curr.y, curr.maxZ, next.minX, next.y, next.maxZ);
+      // Connect matching polygon vertices between floors
+      const n = Math.min(curr.poly.length, next.poly.length);
+      for (let j = 0; j < n; j++) {
+        lines.push(curr.poly[j].x, curr.y, curr.poly[j].z, next.poly[j].x, next.y, next.poly[j].z);
       }
     }
     return new Float32Array(lines);
@@ -257,9 +262,8 @@ export function BuildableVolume({ polygon, height, solarNorthZ }: BuildableVolum
           >
             <planeGeometry args={[w, d]} />
             <meshBasicMaterial
-              color={isCurrent ? '#3b82f6' : '#93c5fd'}
               transparent
-              opacity={isCurrent ? 0.15 : 0.04}
+              opacity={0}
               side={THREE.DoubleSide}
               depthWrite={false}
             />

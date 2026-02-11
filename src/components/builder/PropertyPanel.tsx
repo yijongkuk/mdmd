@@ -279,11 +279,11 @@ function SelectedModulePanel() {
         <div className="space-y-1.5 text-sm">
           <div className="flex justify-between">
             <span className="text-slate-500">그리드 X</span>
-            <span className="font-medium">{placement.gridX}</span>
+            <span className="font-medium">{Number.isInteger(placement.gridX) ? placement.gridX : placement.gridX.toFixed(2)}</span>
           </div>
           <div className="flex justify-between">
             <span className="text-slate-500">그리드 Z</span>
-            <span className="font-medium">{placement.gridZ}</span>
+            <span className="font-medium">{Number.isInteger(placement.gridZ) ? placement.gridZ : placement.gridZ.toFixed(2)}</span>
           </div>
           <div className="flex justify-between">
             <span className="text-slate-500">층</span>
@@ -306,7 +306,7 @@ function SelectedModulePanel() {
             className="h-8"
           >
             <RotateCw className="mr-1.5 h-3.5 w-3.5" />
-            90° 회전
+            15° 회전
           </Button>
         </div>
       </div>
