@@ -66,7 +66,6 @@ export interface SpeckleExportModule {
 
 /** POST /api/speckle/export 요청 body */
 export interface SpeckleExportRequest {
-  streamId: string;
   branchName: string;
   message: string;
   modules: SpeckleExportModule[];

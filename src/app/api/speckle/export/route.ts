@@ -4,6 +4,7 @@ import {
   uploadObjects,
   createBranch,
   createCommit,
+  getModels,
   SPECKLE_SERVER,
 } from '@/lib/api/speckle';
 import type { SpeckleExportRequest, SpeckleExportModule } from '@/types/speckle';
@@ -23,7 +24,7 @@ function toZUp(x: number, y: number, z: number): [number, number, number] {
   return [x, -z, y];
 }
 
-/** BoxGeometry 6면 메시 생성 (Z-up, min corner 기준) */
+/** BoxGeometry 12 삼각형 메시 생성 (Z-up, CCW 와인딩) */
 function createBoxMesh(
   w: number, h: number, d: number,
   posX: number, posY: number, posZ: number,
@@ -42,13 +43,14 @@ function createBoxMesh(
   const vertices: number[] = [];
   for (const [vx, vy, vz] of v) vertices.push(vx, vy, vz);
 
+  // 삼각형 면 (type=0), CCW 와인딩 — 법선이 바깥쪽을 향함
   const faces = [
-    1, 0, 1, 2, 3, // front
-    1, 4, 7, 6, 5, // back
-    1, 0, 4, 5, 1, // bottom
-    1, 3, 2, 6, 7, // top
-    1, 0, 3, 7, 4, // left
-    1, 1, 5, 6, 2, // right
+    0, 0, 3, 2,  0, 0, 2, 1,  // front (+Y)
+    0, 4, 5, 6,  0, 4, 6, 7,  // back  (-Y)
+    0, 0, 1, 5,  0, 0, 5, 4,  // bottom (-Z)
+    0, 3, 7, 6,  0, 3, 6, 2,  // top    (+Z)
+    0, 0, 4, 7,  0, 0, 7, 3,  // left   (-X)
+    0, 1, 2, 6,  0, 1, 6, 5,  // right  (+X)
   ];
 
   return {
@@ -122,14 +124,48 @@ function computeId(obj: Record<string, unknown>): string {
   return createHash('md5').update(json).digest('hex');
 }
 
+/** 내보내기 대상 스트림의 기존 모델(브랜치) 목록 반환 */
+export async function GET() {
+  try {
+    const streamId = process.env.SPECKLE_EXPORT_STREAM_ID;
+    if (!streamId) {
+      return NextResponse.json(
+        { error: 'SPECKLE_EXPORT_STREAM_ID 환경변수가 설정되지 않았습니다' },
+        { status: 500 },
+      );
+    }
+    const branches = await getModels(streamId);
+    // main 브랜치는 제외 (사용자가 만든 모델만 표시)
+    const models = branches
+      .filter((b: { name: string }) => b.name !== 'main')
+      .map((b: { name: string; commits: { totalCount: number } }) => ({
+        name: b.name,
+        commitCount: b.commits.totalCount,
+      }));
+    return NextResponse.json({ models });
+  } catch (err: unknown) {
+    console.error('Speckle export models error:', err);
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as SpeckleExportRequest;
-    const { streamId, branchName, message, modules } = body;
+    const { branchName, message, modules } = body;
 
-    if (!streamId || !branchName || !modules?.length) {
+    const streamId = process.env.SPECKLE_EXPORT_STREAM_ID;
+    if (!streamId) {
       return NextResponse.json(
-        { error: 'streamId, branchName, modules 필수' },
+        { error: 'SPECKLE_EXPORT_STREAM_ID 환경변수가 설정되지 않았습니다' },
+        { status: 500 },
+      );
+    }
+
+    if (!branchName || !modules?.length) {
+      return NextResponse.json(
+        { error: 'branchName, modules 필수' },
         { status: 400 },
       );
     }
@@ -155,33 +191,14 @@ export async function POST(request: Request) {
       }
 
       mesh['name'] = mod.name;
-
-      // RenderMaterial — 개별 색상으로 모듈 구분
-      const renderMat: Record<string, unknown> = {
-        speckle_type: 'Objects.Other.RenderMaterial',
-        name: mod.name,
-        diffuse: hexToArgb(mod.color),
-        opacity: 1,
-        metalness: 0,
-        roughness: 1,
-      };
-      renderMat['id'] = computeId(renderMat);
-      mesh['@renderMaterial'] = renderMat;
-
       mesh['id'] = computeId(mesh);
       meshObjects.push(mesh);
     }
 
     // 3. Root 컨테이너 오브젝트
     const closure: Record<string, number> = {};
-    const extraObjects: Record<string, unknown>[] = [];
     for (const m of meshObjects) {
       closure[m['id'] as string] = 1;
-      const mat = m['@renderMaterial'] as Record<string, unknown> | undefined;
-      if (mat?.['id']) {
-        closure[mat['id'] as string] = 2;
-        extraObjects.push(mat);
-      }
     }
 
     const root: Record<string, unknown> = {
@@ -199,7 +216,7 @@ export async function POST(request: Request) {
     root['id'] = rootId;
 
     // 4. 모든 오브젝트 업로드
-    const allObjects = [...extraObjects, ...meshObjects, root];
+    const allObjects = [...meshObjects, root];
     await uploadObjects(streamId, allObjects);
 
     // 5. 커밋 생성

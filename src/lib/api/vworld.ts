@@ -53,6 +53,22 @@ function computeCentroid(coordinates: number[][][]): { lat: number; lng: number 
   };
 }
 
+/** Ray-casting point-in-polygon test (GeoJSON [lng,lat] 좌표 기준) */
+function pointInPolygon(testLng: number, testLat: number, coordinates: number[][][]): boolean {
+  const ring = coordinates[0];
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    if ((yi > testLat) !== (yj > testLat) &&
+        testLng < (xj - xi) * (testLat - yi) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+
 /** Approximate polygon area in m² using Shoelace formula with lat/lng → meter conversion */
 function computeAreaM2(coordinates: number[][][]): number {
   const ring = coordinates[0];
@@ -156,50 +172,68 @@ export async function getCadastralParcels(
   }
 }
 
+/** V-World PNU 조회 (단일 PNU) */
+async function fetchParcelByPnu(pnu: string): Promise<Partial<LandParcel> | null> {
+  const params = new URLSearchParams({
+    service: 'data',
+    request: 'GetFeature',
+    data: 'LP_PA_CBND_BUBUN',
+    key: VWORLD_API_KEY,
+    attrFilter: `pnu:=:${pnu}`,
+    crs: 'EPSG:4326',
+    format: 'json',
+    geometry: 'true',
+    attribute: 'true',
+  });
+
+  const res = await fetch(`${DATA_URL}?${params.toString()}`, { headers: VWORLD_HEADERS });
+  if (!res.ok) return null;
+
+  const json = await res.json();
+  if (json?.response?.status !== 'OK') return null;
+  const features = json?.response?.result?.featureCollection?.features;
+  if (!Array.isArray(features) || features.length === 0) return null;
+
+  const f = features[0];
+  const props = f.properties;
+  const polygon = normalizeGeometry(f.geometry);
+  const centroid = computeCentroid(polygon.coordinates);
+
+  return {
+    id: props.pnu,
+    pnu: props.pnu,
+    address: props.addr,
+    area: computeAreaM2(polygon.coordinates),
+    officialPrice: parseInt(props.jiga, 10) || undefined,
+    geometryJson: polygon,
+    centroidLat: centroid.lat,
+    centroidLng: centroid.lng,
+    dataSource: 'vworld' as const,
+  };
+}
+
 export async function getParcelByPnu(pnu: string): Promise<Partial<LandParcel> | null> {
   const cacheKey = `parcel:pnu:${pnu}`;
   const cached = getCached<Partial<LandParcel>>(cacheKey);
   if (cached) return cached;
 
   try {
-    const params = new URLSearchParams({
-      service: 'data',
-      request: 'GetFeature',
-      data: 'LP_PA_CBND_BUBUN',
-      key: VWORLD_API_KEY,
-      attrFilter: `pnu:=:${pnu}`,
-      crs: 'EPSG:4326',
-      format: 'json',
-      geometry: 'true',
-      attribute: 'true',
-    });
+    // 1차: 그대로 조회
+    let parcel = await fetchParcelByPnu(pnu);
 
-    const res = await fetch(`${DATA_URL}?${params.toString()}`, { headers: VWORLD_HEADERS });
-    if (!res.ok) return null;
+    // 2차: 산구분 변환 fallback (OnBid 0/1 → V-World 1/2 변환이 안 된 경우 대비)
+    if (!parcel && pnu.length === 19) {
+      const mountain = pnu[10];
+      if (mountain === '0') {
+        parcel = await fetchParcelByPnu(pnu.slice(0, 10) + '1' + pnu.slice(11));
+      } else if (mountain === '1') {
+        parcel = await fetchParcelByPnu(pnu.slice(0, 10) + '2' + pnu.slice(11));
+      }
+    }
 
-    const json = await res.json();
-    if (json?.response?.status !== 'OK') return null;
-    const features = json?.response?.result?.featureCollection?.features;
-    if (!Array.isArray(features) || features.length === 0) return null;
-
-    const f = features[0];
-    const props = f.properties;
-    const polygon = normalizeGeometry(f.geometry);
-    const centroid = computeCentroid(polygon.coordinates);
-
-    const parcel: Partial<LandParcel> = {
-      id: props.pnu,
-      pnu: props.pnu,
-      address: props.addr,
-      area: computeAreaM2(polygon.coordinates),
-      officialPrice: parseInt(props.jiga, 10) || undefined,
-      geometryJson: polygon,
-      centroidLat: centroid.lat,
-      centroidLng: centroid.lng,
-      dataSource: 'vworld' as const,
-    };
-
-    setCache(cacheKey, parcel, TTL.PNU_QUERY);
+    if (parcel) {
+      setCache(cacheKey, parcel, TTL.PNU_QUERY);
+    }
     return parcel;
   } catch (err) {
     console.error('V-World getParcelByPnu error:', err);
@@ -243,10 +277,32 @@ export async function getParcelByCoords(
     const features = json?.response?.result?.featureCollection?.features;
     if (!Array.isArray(features) || features.length === 0) return null;
 
-    // 가장 가까운 필지 선택 (첫 번째)
-    const f = features[0];
-    const props = f.properties;
-    const polygon = normalizeGeometry(f.geometry);
+    // 1차: 좌표가 실제로 포함된 폴리곤 선택 (point-in-polygon)
+    let bestFeature = null;
+    for (const f of features) {
+      const poly = normalizeGeometry(f.geometry);
+      if (pointInPolygon(lng, lat, poly.coordinates)) {
+        bestFeature = f;
+        break;
+      }
+    }
+    // 2차 fallback: centroid 거리 기준 최근접 필지
+    if (!bestFeature) {
+      let bestDist = Infinity;
+      for (const f of features) {
+        const poly = normalizeGeometry(f.geometry);
+        const c = computeCentroid(poly.coordinates);
+        const dist = (c.lat - lat) ** 2 + (c.lng - lng) ** 2;
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestFeature = f;
+        }
+      }
+    }
+    if (!bestFeature) bestFeature = features[0];
+
+    const props = bestFeature.properties;
+    const polygon = normalizeGeometry(bestFeature.geometry);
     const centroid = computeCentroid(polygon.coordinates);
 
     const parcel: Partial<LandParcel> = {

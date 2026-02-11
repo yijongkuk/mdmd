@@ -79,31 +79,249 @@ function resolveChunkedArray(
   return result.length > 0 ? result : null;
 }
 
+// ===== Transform 행렬 유틸 =====
+
+/** 항등 행렬 (row-major 4x4) */
+const IDENTITY: number[] = [
+  1, 0, 0, 0,
+  0, 1, 0, 0,
+  0, 0, 1, 0,
+  0, 0, 0, 1,
+];
+
+/** 오브젝트에서 4x4 transform 행렬 추출 (row-major flat array) */
+function getTransformMatrix(
+  obj: Record<string, unknown>,
+  allObjects: Record<string, Record<string, unknown>>,
+): number[] | null {
+  const t = obj.transform;
+  if (!t) return null;
+
+  // flat array of 16 numbers (가장 흔한 Speckle 형식)
+  if (Array.isArray(t) && t.length === 16 && typeof t[0] === 'number') {
+    return t as number[];
+  }
+
+  if (t && typeof t === 'object' && !Array.isArray(t)) {
+    const tObj = t as Record<string, unknown>;
+    // { value: [16] } or { matrix: [16] }
+    for (const key of ['value', 'matrix']) {
+      const arr = tObj[key];
+      if (Array.isArray(arr) && arr.length === 16 && typeof arr[0] === 'number') {
+        return arr as number[];
+      }
+    }
+    // reference to transform object
+    if (typeof tObj.referencedId === 'string') {
+      const resolved = allObjects[tObj.referencedId];
+      if (resolved) return getTransformMatrix(resolved, allObjects);
+    }
+  }
+
+  return null;
+}
+
+/** row-major 4x4 행렬 곱 (A × B) */
+function multiplyMatrices(a: number[], b: number[]): number[] {
+  const r = new Array(16).fill(0);
+  for (let row = 0; row < 4; row++) {
+    for (let col = 0; col < 4; col++) {
+      for (let k = 0; k < 4; k++) {
+        r[row * 4 + col] += a[row * 4 + k] * b[k * 4 + col];
+      }
+    }
+  }
+  return r;
+}
+
+/** row-major 4x4 행렬을 vertex 배열에 적용 */
+function applyTransformToVertices(vertices: number[], m: number[]): number[] {
+  const out = new Array(vertices.length);
+  for (let i = 0; i < vertices.length; i += 3) {
+    const x = vertices[i], y = vertices[i + 1], z = vertices[i + 2];
+    out[i]     = m[0] * x + m[1] * y + m[2] * z + m[3];
+    out[i + 1] = m[4] * x + m[5] * y + m[6] * z + m[7];
+    out[i + 2] = m[8] * x + m[9] * y + m[10] * z + m[11];
+  }
+  return out;
+}
+
+/** transform이 항등행렬인지 확인 */
+function isIdentity(m: number[]): boolean {
+  for (let i = 0; i < 16; i++) {
+    if (Math.abs(m[i] - IDENTITY[i]) > 1e-6) return false;
+  }
+  return true;
+}
+
+/**
+ * 참조 ID를 해석하여 실제 오브젝트 반환
+ */
+function resolveRef(
+  item: Record<string, unknown>,
+  allObjects: Record<string, Record<string, unknown>>,
+): Record<string, unknown> {
+  if (typeof item.referencedId === 'string' && allObjects[item.referencedId]) {
+    return allObjects[item.referencedId];
+  }
+  return item;
+}
+
+// ===== Speckle v3 Proxy Schema 지원 =====
+
+/**
+ * InstanceDefinitionProxy의 applicationId → 해당 오브젝트
+ * InstanceProxy.definitionId (GUID) → InstanceDefinitionProxy.applicationId 매칭
+ */
+interface ProxyMaps {
+  /** definitionId (GUID) → InstanceDefinitionProxy 오브젝트 */
+  definitionMap: Map<string, Record<string, unknown>>;
+  /** applicationId → 실제 geometry 오브젝트 */
+  appIdToObjMap: Map<string, Record<string, unknown>>;
+  /** 인스턴스 정의의 멤버인 applicationId 집합 (일반 탐색에서 스킵용) */
+  instanceMemberAppIds: Set<string>;
+}
+
+/**
+ * allObjects를 스캔하여 Proxy Schema 룩업 맵 생성
+ */
+function buildProxyMaps(allObjects: Record<string, Record<string, unknown>>): ProxyMaps {
+  const definitionMap = new Map<string, Record<string, unknown>>();
+  const appIdToObjMap = new Map<string, Record<string, unknown>>();
+  const instanceMemberAppIds = new Set<string>();
+
+  for (const obj of Object.values(allObjects)) {
+    const speckleType = (obj.speckle_type as string) || '';
+    const appId = obj.applicationId as string | undefined;
+
+    // InstanceDefinitionProxy: applicationId로 매핑
+    if (
+      speckleType.includes('InstanceDefinitionProxy') ||
+      speckleType.includes('BlockDefinition') ||
+      speckleType === 'Objects.Organization.Definition'
+    ) {
+      if (appId) {
+        definitionMap.set(appId, obj);
+      }
+      // 멤버 오브젝트 applicationId 수집
+      const memberIds = obj.objects;
+      if (Array.isArray(memberIds)) {
+        for (const mid of memberIds) {
+          if (typeof mid === 'string') instanceMemberAppIds.add(mid);
+        }
+      }
+    }
+
+    // 모든 오브젝트의 applicationId → 오브젝트 매핑
+    if (appId) {
+      appIdToObjMap.set(appId, obj);
+    }
+  }
+
+  return { definitionMap, appIdToObjMap, instanceMemberAppIds };
+}
+
 /**
  * 오브젝트 트리를 재귀 탐색하여 메시 추출
- * displayValue, elements 등의 키를 탐색하고
- * vertices/faces가 DataChunk 참조인 경우 해석
+ * transform 행렬을 누적하여 각 메시의 월드 좌표 복원
  */
 function extractMeshes(
   obj: Record<string, unknown>,
   allObjects: Record<string, Record<string, unknown>>,
   meshes: RawMesh[],
+  proxyMaps: ProxyMaps,
   rootUnits?: string,
   depth = 0,
+  parentTransform: number[] | null = null,
+  fromInstance = false,
 ): void {
   if (!obj || typeof obj !== 'object' || depth > 20) return;
 
+  // 일반 탐색 시 인스턴스 정의 멤버는 건너뜀 (InstanceProxy 경로에서만 처리)
+  if (!fromInstance && proxyMaps.instanceMemberAppIds.size > 0) {
+    const appId = obj.applicationId as string | undefined;
+    if (appId && proxyMaps.instanceMemberAppIds.has(appId)) {
+      return;
+    }
+  }
+
   const units = (obj.units as string) || rootUnits;
 
-  // 이 오브젝트가 메시인지 확인 (speckle_type 또는 vertices+faces 존재)
-  const isMeshType = obj.speckle_type === 'Objects.Geometry.Mesh';
+  // 이 오브젝트의 transform 누적
+  const localTransform = getTransformMatrix(obj, allObjects);
+  let currentTransform = parentTransform;
+  if (localTransform && !isIdentity(localTransform)) {
+    currentTransform = currentTransform
+      ? multiplyMatrices(currentTransform, localTransform)
+      : localTransform;
+  }
+
+  // InstanceProxy / BlockInstance: definition 참조를 transform과 함께 탐색
+  const speckleType = (obj.speckle_type as string) || '';
+  if (speckleType.includes('Instance') || speckleType.includes('BlockInstance')) {
+    let found = false;
+
+    // Pattern 1: v2 direct definition reference (definition / @definition / blockDefinition)
+    const defKeys = ['definition', '@definition', 'blockDefinition', '@blockDefinition', '@geometry'];
+    for (const key of defKeys) {
+      const def = obj[key];
+      if (!def) continue;
+      found = true;
+      if (Array.isArray(def)) {
+        for (const item of def) {
+          if (item && typeof item === 'object') {
+            const resolved = resolveRef(item as Record<string, unknown>, allObjects);
+            extractMeshes(resolved, allObjects, meshes, proxyMaps, units, depth + 1, currentTransform, true);
+          }
+        }
+      } else if (typeof def === 'object') {
+        const resolved = resolveRef(def as Record<string, unknown>, allObjects);
+        extractMeshes(resolved, allObjects, meshes, proxyMaps, units, depth + 1, currentTransform, true);
+      }
+    }
+
+    // Pattern 2: v3 Proxy Schema — definitionId (GUID) → InstanceDefinitionProxy
+    if (!found && typeof obj.definitionId === 'string') {
+      const defProxy = proxyMaps.definitionMap.get(obj.definitionId);
+      if (defProxy) {
+        // InstanceDefinitionProxy.objects = applicationId[] of member geometry
+        const memberAppIds = defProxy.objects;
+        if (Array.isArray(memberAppIds)) {
+          for (const appId of memberAppIds) {
+            if (typeof appId !== 'string') continue;
+            const memberObj = proxyMaps.appIdToObjMap.get(appId);
+            if (memberObj) {
+              extractMeshes(memberObj, allObjects, meshes, proxyMaps, units, depth + 1, currentTransform, true);
+            }
+          }
+          found = true;
+        }
+        // Fallback: definition has displayValue directly
+        if (!found) {
+          extractMeshes(defProxy, allObjects, meshes, proxyMaps, units, depth + 1, currentTransform, true);
+          found = true;
+        }
+      }
+    }
+
+    if (found) return;
+    // If neither pattern matched, fall through to generic child traversal
+  }
+
+  // 이 오브젝트가 메시인지 확인
+  const isMeshType = speckleType === 'Objects.Geometry.Mesh';
   const hasGeom = obj.vertices !== undefined && obj.faces !== undefined;
 
   if (isMeshType || hasGeom) {
-    const vertices = resolveChunkedArray(obj.vertices, allObjects);
+    let vertices = resolveChunkedArray(obj.vertices, allObjects);
     const faces = resolveChunkedArray(obj.faces, allObjects);
 
     if (vertices && vertices.length >= 9 && faces && faces.length >= 4) {
+      // transform 적용 (로컬 → 월드)
+      if (currentTransform && !isIdentity(currentTransform)) {
+        vertices = applyTransformToVertices(vertices, currentTransform);
+      }
+
       const colors = resolveChunkedArray(obj.colors, allObjects) ?? undefined;
       meshes.push({
         vertices,
@@ -112,7 +330,7 @@ function extractMeshes(
         name: typeof obj.name === 'string' ? obj.name : undefined,
         units,
       });
-      return; // 메시를 찾았으면 하위 탐색 불필요
+      return;
     }
   }
 
@@ -132,22 +350,13 @@ function extractMeshes(
     if (Array.isArray(child)) {
       for (const item of child) {
         if (item && typeof item === 'object' && !Array.isArray(item)) {
-          const record = item as Record<string, unknown>;
-          // 참조 해석
-          if (typeof record.referencedId === 'string' && allObjects[record.referencedId]) {
-            extractMeshes(allObjects[record.referencedId], allObjects, meshes, units, depth + 1);
-          } else {
-            extractMeshes(record, allObjects, meshes, units, depth + 1);
-          }
+          const resolved = resolveRef(item as Record<string, unknown>, allObjects);
+          extractMeshes(resolved, allObjects, meshes, proxyMaps, units, depth + 1, currentTransform);
         }
       }
     } else if (typeof child === 'object') {
-      const record = child as Record<string, unknown>;
-      if (typeof record.referencedId === 'string' && allObjects[record.referencedId]) {
-        extractMeshes(allObjects[record.referencedId], allObjects, meshes, units, depth + 1);
-      } else {
-        extractMeshes(record, allObjects, meshes, units, depth + 1);
-      }
+      const resolved = resolveRef(child as Record<string, unknown>, allObjects);
+      extractMeshes(resolved, allObjects, meshes, proxyMaps, units, depth + 1, currentTransform);
     }
   }
 }
@@ -220,9 +429,13 @@ export async function GET(
 
     const rootUnits = (root.units as string) || 'm';
 
-    // 메시 추출 (DataChunk 자동 해석)
+    // Proxy Schema 룩업 맵 생성 (InstanceProxy definitionId → geometry 해석용)
+    const proxyMaps = buildProxyMaps(allObjects);
+    console.log(`[Speckle] Proxy maps: ${proxyMaps.definitionMap.size} definitions, ${proxyMaps.appIdToObjMap.size} appId entries, ${proxyMaps.instanceMemberAppIds.size} instance members`);
+
+    // 메시 추출 (DataChunk 자동 해석 + transform 적용)
     const rawMeshes: RawMesh[] = [];
-    extractMeshes(root, allObjects, rawMeshes, rootUnits);
+    extractMeshes(root, allObjects, rawMeshes, proxyMaps, rootUnits);
 
     if (rawMeshes.length === 0) {
       return NextResponse.json({ error: 'No mesh data found in object' }, { status: 404 });

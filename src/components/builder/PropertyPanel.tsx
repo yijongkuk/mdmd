@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { RotateCw, Trash2, Box, Layers, Save, Check, Loader2, AlertCircle, Pencil, Upload } from 'lucide-react';
-import { cn } from '@/lib/cn';
+import { SpeckleExportDialog } from './SpeckleExportDialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -11,10 +11,9 @@ import { useBuilderStore } from '@/features/builder/store';
 import { getModuleById } from '@/lib/constants/modules';
 import { getMaterialById } from '@/lib/constants/materials';
 import { MODULE_CATEGORY_LABELS } from '@/types/builder';
-import { FLOOR_LABELS, GRID_SIZE } from '@/lib/constants/grid';
+import { FLOOR_LABELS } from '@/lib/constants/grid';
 import { formatWon } from '@/lib/utils/format';
 import { MaterialPicker } from './MaterialPicker';
-import { SpeckleExportDialog } from './SpeckleExportDialog';
 
 function FloorAreaTable() {
   const floorAreas = useBuilderStore((s) => s.floorAreas);
@@ -223,7 +222,6 @@ function SelectedModulePanel() {
   const rotatePlacement = useBuilderStore((s) => s.rotatePlacement);
   const removePlacement = useBuilderStore((s) => s.removePlacement);
   const selectPlacement = useBuilderStore((s) => s.selectPlacement);
-  const [exportOpen, setExportOpen] = useState(false);
 
   // Show first selected module's details
   const placement = placements.find((p) => p.id === selectedPlacementIds[0]);
@@ -344,18 +342,6 @@ function SelectedModulePanel() {
 
       <Separator />
 
-      {/* Speckle Export */}
-      <Button
-        variant="outline"
-        size="sm"
-        className="w-full"
-        onClick={() => setExportOpen(true)}
-      >
-        <Upload className="mr-1.5 h-3.5 w-3.5" />
-        Speckle로 내보내기
-      </Button>
-      <SpeckleExportDialog open={exportOpen} onOpenChange={setExportOpen} />
-
       {/* Delete */}
       <Button
         variant="destructive"
@@ -382,7 +368,19 @@ interface PropertyPanelProps {
 
 export function PropertyPanel({ onSave, saveStatus, lastSavedAt, onRename }: PropertyPanelProps) {
   const selectedPlacementIds = useBuilderStore((s) => s.selectedPlacementIds);
+  const placements = useBuilderStore((s) => s.placements);
   const hasSelection = selectedPlacementIds.length > 0;
+  const hasModules = placements.length > 0;
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportModels, setExportModels] = useState<{ name: string; commitCount: number }[]>([]);
+
+  // 마운트 시 Speckle 기존 모델 목록 미리 fetch
+  useEffect(() => {
+    fetch('/api/speckle/export')
+      .then((r) => r.json())
+      .then((data) => { if (data.models) setExportModels(data.models); })
+      .catch(() => {});
+  }, []);
 
   return (
     <div className="flex h-full flex-col">
@@ -402,6 +400,20 @@ export function PropertyPanel({ onSave, saveStatus, lastSavedAt, onRename }: Pro
           <ProjectSummary onSave={onSave} saveStatus={saveStatus} lastSavedAt={lastSavedAt} onRename={onRename} />
         )}
       </ScrollArea>
+      {/* Sticky export button at bottom */}
+      {hasModules && (
+        <div className="border-t border-slate-200 p-4">
+          <Button
+            size="sm"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+            onClick={() => setExportOpen(true)}
+          >
+            <Upload className="mr-1.5 h-3.5 w-3.5" />
+            모듈 내보내기
+          </Button>
+          <SpeckleExportDialog open={exportOpen} onOpenChange={setExportOpen} prefetchedModels={exportModels} />
+        </div>
+      )}
     </div>
   );
 }

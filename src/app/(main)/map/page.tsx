@@ -1,18 +1,22 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { Suspense, useState, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { cn } from '@/lib/cn';
 import type { MapBounds } from '@/types/land';
 import type { AuctionProperty, AuctionFilters } from '@/types/auction';
 import { useAuctionProperties } from '@/features/auction';
+import { useBuilderStore } from '@/features/builder/store';
 import { KakaoMap, getKakaoMapInstance } from '@/components/map/KakaoMap';
 import { AuctionOverlay } from '@/components/map/AuctionOverlay';
 import { AuctionInfoPanel } from '@/components/map/AuctionInfoPanel';
 import { AuctionBottomList } from '@/components/map/AuctionBottomList';
 import { AuctionFilterPanel } from '@/components/map/AuctionFilterPanel';
-import { MapControls } from '@/components/map/MapControls';
+import { MapControls, type MapType } from '@/components/map/MapControls';
 
 const METRO_PREFIXES = ['서울', '경기', '인천'];
+
+const LOW_UNIT_PRICE_THRESHOLD = 10_000; // 1만원/m²
 
 const DEFAULT_FILTERS: AuctionFilters = {
   priceRange: [0, Number.MAX_SAFE_INTEGER],
@@ -22,6 +26,7 @@ const DEFAULT_FILTERS: AuctionFilters = {
   region: 'all',
   searchQuery: '',
   dataSources: [],
+  excludeLowUnitPrice: true,
 };
 
 function hasActiveFilters(filters: AuctionFilters): boolean {
@@ -34,11 +39,31 @@ function hasActiveFilters(filters: AuctionFilters): boolean {
     filters.landTypes.length > 0 ||
     filters.region !== 'all' ||
     filters.searchQuery !== '' ||
-    filters.dataSources.length > 0
+    filters.dataSources.length > 0 ||
+    filters.excludeLowUnitPrice !== true
   );
 }
 
 export default function MapPage() {
+  return (
+    <Suspense fallback={<div className="flex h-[calc(100vh-3.5rem)] items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-300 border-t-blue-600" /></div>}>
+      <MapPageInner />
+    </Suspense>
+  );
+}
+
+function MapPageInner() {
+  const searchParams = useSearchParams();
+  const parcelCenter = useBuilderStore((s) => s.parcelCenter);
+  const paramLat = Number(searchParams.get('lat')) || 0;
+  const paramLng = Number(searchParams.get('lng')) || 0;
+  // URL 파라미터 우선, 없으면 빌더 스토어의 필지 좌표 사용 (뒤로가기 대응)
+  const mapInitialCenter = (paramLat && paramLng)
+    ? { lat: paramLat, lng: paramLng }
+    : parcelCenter ?? undefined;
+  // 좌표가 전달되면 가까이 줌인 (level 4 ≈ 동네 수준)
+  const mapInitialLevel = mapInitialCenter ? 4 : undefined;
+
   const [bounds, setBounds] = useState<MapBounds | null>(null);
   const [zoomLevel, setZoomLevel] = useState(11);
   const [showAuctions, setShowAuctions] = useState(true);
@@ -46,6 +71,7 @@ export default function MapPage() {
   const [filters, setFilters] = useState<AuctionFilters>(DEFAULT_FILTERS);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const [listCollapsed, setListCollapsed] = useState(false);
+  const [mapType, setMapType] = useState<MapType>('roadmap');
 
   // OnBid 매각/임대 물건 — 실제 공매·매각·임대 유휴지만 표시
   const { properties: auctionProperties, isLoading: auctionsLoading, loadingRegion, progress } =
@@ -53,6 +79,15 @@ export default function MapPage() {
 
   // Client-side filtering (공통 필터 로직)
   const applyFilters = useCallback((p: AuctionProperty) => {
+    // 저단가 / 비정상 매물 필터
+    if (filters.excludeLowUnitPrice && p.appraisalValue > 0) {
+      // 면적 있으면 단가 계산: 1만원/m² 미만 제외
+      if (p.area != null && p.area > 0) {
+        if (p.appraisalValue / p.area < LOW_UNIT_PRICE_THRESHOLD) return false;
+      }
+      // 면적 없거나 공시지가 없는데 감정가 100만원 미만 → 비정상
+      if (!p.officialLandPrice && p.appraisalValue < 1_000_000) return false;
+    }
     // 데이터 소스 필터
     if (filters.dataSources.length > 0 && !filters.dataSources.includes(p.source ?? 'onbid')) return false;
     // 감정가액 기준 필터
@@ -143,6 +178,16 @@ export default function MapPage() {
     setFilterPanelOpen((v) => !v);
   }, []);
 
+  const handleMapTypeChange = useCallback((type: MapType) => {
+    setMapType(type);
+    const map = getKakaoMapInstance();
+    if (map && window.kakao?.maps) {
+      const { MapTypeId } = window.kakao.maps;
+      const typeMap = { roadmap: MapTypeId.ROADMAP, skyview: MapTypeId.SKYVIEW, hybrid: MapTypeId.HYBRID };
+      map.setMapTypeId(typeMap[type]);
+    }
+  }, []);
+
   const handleFiltersChange = useCallback((next: AuctionFilters) => {
     setFilters(next);
   }, []);
@@ -157,7 +202,7 @@ export default function MapPage() {
 
   return (
     <div className="relative h-[calc(100vh-3.5rem)] w-full overflow-hidden">
-      <KakaoMap onBoundsChange={handleBoundsChange} onZoomChange={handleZoomChange}>
+      <KakaoMap onBoundsChange={handleBoundsChange} onZoomChange={handleZoomChange} initialCenter={mapInitialCenter} initialLevel={mapInitialLevel}>
         {/* Kakao overlays would render here if SDK is available */}
       </KakaoMap>
 
@@ -207,6 +252,8 @@ export default function MapPage() {
         onToggleAuctions={handleToggleAuctions}
         filterOpen={filterPanelOpen}
         onToggleFilter={handleToggleFilter}
+        mapType={mapType}
+        onMapTypeChange={handleMapTypeChange}
         hasActiveFilters={activeFilters}
       />
 

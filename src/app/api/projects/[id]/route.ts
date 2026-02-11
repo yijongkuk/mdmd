@@ -7,13 +7,14 @@ export async function GET(
 ) {
   const { id } = await params;
 
-  // upsert: 없으면 자동 생성 (빌더 직접 진입 / old localStorage ID 대응)
-  const project = await prisma.project.upsert({
+  const project = await prisma.project.findUnique({
     where: { id },
-    update: {},
-    create: { id, name: '새 프로젝트' },
     include: { placements: true },
   });
+
+  if (!project) {
+    return NextResponse.json(null, { status: 404 });
+  }
 
   return NextResponse.json(project);
 }
@@ -25,11 +26,13 @@ export async function PUT(
   const { id } = await params;
   const body = await request.json();
 
-  const { name, description, parcelPnu, totalModules, totalArea, totalCost, placements } =
+  const { name, description, parcelPnu, appraisalValue, minBidPrice, totalModules, totalArea, totalCost, placements } =
     body as {
       name?: string;
       description?: string;
       parcelPnu?: string;
+      appraisalValue?: number;
+      minBidPrice?: number;
       totalModules?: number;
       totalArea?: number;
       totalCost?: number;
@@ -49,6 +52,8 @@ export async function PUT(
     ...(name !== undefined && { name }),
     ...(description !== undefined && { description }),
     ...(parcelPnu !== undefined && { parcelPnu }),
+    ...(appraisalValue !== undefined && { appraisalValue }),
+    ...(minBidPrice !== undefined && { minBidPrice }),
     ...(totalModules !== undefined && { totalModules }),
     ...(totalArea !== undefined && { totalArea }),
     ...(totalCost !== undefined && { totalCost }),

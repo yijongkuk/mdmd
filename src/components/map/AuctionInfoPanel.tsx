@@ -35,7 +35,12 @@ export const AuctionInfoPanel = memo(function AuctionInfoPanel({ property, onClo
 
     let cancelled = false;
     setLandLoading(true);
-    fetch(`/api/land/parcel-info?lat=${property.lat}&lng=${property.lng}`)
+    const params = new URLSearchParams();
+    params.set('lat', String(property.lat));
+    params.set('lng', String(property.lng));
+    if (property.pnu) params.set('pnu', property.pnu);
+    if (property.address) params.set('address', property.address);
+    fetch(`/api/land/parcel-info?${params.toString()}`)
       .then((r) => r.json())
       .then((data) => {
         if (!cancelled) setLandDetail(data);
@@ -63,6 +68,8 @@ export const AuctionInfoPanel = memo(function AuctionInfoPanel({ property, onClo
     const params = new URLSearchParams();
     if (pnu) params.set('parcelPnu', pnu);
     params.set('auctionId', property.id);
+    if (property.appraisalValue > 0) params.set('appraisalValue', String(property.appraisalValue));
+    if (property.minBidPrice > 0) params.set('minBidPrice', String(property.minBidPrice));
     router.push(`/builder/${newProjectId}?${params.toString()}`);
   };
 

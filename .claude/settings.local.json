@@ -81,7 +81,22 @@
       "Bash(done)",
       "Bash(powershell -NoProfile -Command:*)",
       "Bash(git init:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git config:*)",
+      "Bash(gh repo create:*)",
+      "Bash(git remote add:*)",
+      "Bash(git branch:*)",
+      "Bash(git push:*)",
+      "Bash(npx next build:*)",
+      "Bash(npm run build:*)",
+      "Bash(del \"D:\\\\IRENEHAUS\\\\10_BM\\\\mdmd\\\\temp_speckle_inspect.mjs\")",
+      "WebFetch(domain:www.speckle.systems)",
+      "WebFetch(domain:deepwiki.com)",
+      "Bash(npx tsx:*)",
+      "Bash(sqlite3:*)",
+      "Bash(wmic process where \"CommandLine like ''%next%dev%'' and Name=''node.exe''\" get ProcessId,CommandLine /format:list)",
+      "Bash(git ls-tree:*)"
     ]
   }
 }

@@ -25,6 +25,7 @@ const DEFAULT_FILTERS: AuctionFilters = {
   region: 'all',
   searchQuery: '',
   dataSources: [],
+  excludeLowUnitPrice: true,
 };
 
 function formatArea(m2: number): string {
@@ -245,6 +246,16 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
     return counts;
   }, [allProperties]);
 
+  // 저단가/비정상 매물 수
+  const lowUnitPriceCount = useMemo(() => {
+    return allProperties.filter((p) => {
+      if (p.appraisalValue <= 0) return false;
+      if (p.area != null && p.area > 0 && p.appraisalValue / p.area < 10_000) return true;
+      if (!p.officialLandPrice && p.appraisalValue < 1_000_000) return true;
+      return false;
+    }).length;
+  }, [allProperties]);
+
   const isPresetActive = (range: [number, number]) =>
     filters.priceRange[0] === range[0] && filters.priceRange[1] === range[1];
 
@@ -327,6 +338,26 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
             ))}
           </div>
         </div>
+
+        {/* Low unit price filter */}
+        {lowUnitPriceCount > 0 && (
+          <div>
+            <label className="flex cursor-pointer items-center gap-2 rounded-md border border-slate-200 px-3 py-2 hover:bg-slate-50">
+              <input
+                type="checkbox"
+                checked={filters.excludeLowUnitPrice}
+                onChange={() => onFiltersChange({ ...filters, excludeLowUnitPrice: !filters.excludeLowUnitPrice })}
+                className="h-3.5 w-3.5 rounded border-slate-300 text-red-500 focus:ring-red-500"
+              />
+              <div className="flex-1 min-w-0">
+                <span className="text-xs font-medium text-slate-700">저단가 매물 제외</span>
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  단가 1만원/m² 미만 ({lowUnitPriceCount}건 제외)
+                </p>
+              </div>
+            </label>
+          </div>
+        )}
 
         {/* Search */}
         <div>

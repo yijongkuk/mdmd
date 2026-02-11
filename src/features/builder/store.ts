@@ -33,6 +33,7 @@ interface BuilderStore {
   toastType: 'info' | 'error';
   boxSelectRect: { x1: number; y1: number; x2: number; y2: number; crossing: boolean } | null;
   clipboard: Omit<ModulePlacement, 'id' | 'floor'>[] | null;
+  parcelCenter: { lat: number; lng: number } | null;
 
   // Undo/Redo
   undoStack: ModulePlacement[][];
@@ -72,6 +73,7 @@ interface BuilderStore {
   pastePlacements: () => void;
   loadPlacements: (placements: ModulePlacement[]) => void;
   clearAll: () => void;
+  setParcelCenter: (center: { lat: number; lng: number } | null) => void;
 }
 
 function pushUndo(undoStack: ModulePlacement[][], snapshot: ModulePlacement[]): ModulePlacement[][] {
@@ -104,6 +106,7 @@ export const useBuilderStore = create<BuilderStore>((set) => ({
   toastType: 'info' as const,
   boxSelectRect: null,
   clipboard: null,
+  parcelCenter: null,
   undoStack: [],
   redoStack: [],
 
@@ -305,4 +308,6 @@ export const useBuilderStore = create<BuilderStore>((set) => ({
       selectedModuleDefId: null,
       activeTool: 'select',
     })),
+
+  setParcelCenter: (center) => set({ parcelCenter: center }),
 }));

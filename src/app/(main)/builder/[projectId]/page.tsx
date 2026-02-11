@@ -16,6 +16,7 @@ import { BoxSelectOverlay } from '@/components/builder/BoxSelectOverlay';
 import { FLOOR_HEIGHT } from '@/lib/constants/grid';
 import { getModuleById } from '@/lib/constants/modules';
 import { getMaterialById } from '@/lib/constants/materials';
+import { formatWon } from '@/lib/utils/format';
 import type { ParcelInput } from '@/features/regulations/engine';
 import type { ParcelInfo } from '@/types/land';
 import type { ModulePlacement } from '@/types/builder';
@@ -27,7 +28,6 @@ const BuilderCanvas = dynamic(
   { ssr: false },
 );
 
-const AUTOSAVE_INTERVAL = 10_000;
 
 function computeStats(placements: ModulePlacement[]) {
   let totalArea = 0;
@@ -47,33 +47,45 @@ export default function BuilderPage() {
   const searchParams = useSearchParams();
   const projectId = params.projectId;
   const parcelPnu = searchParams.get('parcelPnu');
+  const queryAppraisal = Number(searchParams.get('appraisalValue')) || 0;
+  const queryMinBid = Number(searchParams.get('minBidPrice')) || 0;
 
   const setProjectId = useBuilderStore((s) => s.setProjectId);
   const setProjectName = useBuilderStore((s) => s.setProjectName);
   const setMaxFloors = useBuilderStore((s) => s.setMaxFloors);
   const loadPlacements = useBuilderStore((s) => s.loadPlacements);
   const placements = useBuilderStore((s) => s.placements);
+  const setParcelCenter = useBuilderStore((s) => s.setParcelCenter);
 
   const [parcelInfo, setParcelInfo] = useState<ParcelInfo | null>(null);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [appraisalValue, setAppraisalValue] = useState(0);
+  const [minBidPrice, setMinBidPrice] = useState(0);
   // effectivePnu: URL 쿼리 우선, 없으면 DB에서 로드한 값 사용
   const [dbParcelPnu, setDbParcelPnu] = useState<string | null>(null);
   const effectivePnu = parcelPnu ?? dbParcelPnu;
 
   // DB에서 프로젝트 로드가 완료되기 전까지 autosave 차단
   const loadedRef = useRef(false);
+  // DB에 이미 존재하는 프로젝트인지 (한 번이라도 저장된 적 있는지)
+  const existsInDbRef = useRef(false);
   // unmount/cleanup save 시 정확한 projectId를 참조하기 위한 ref
   const projectIdRef = useRef(projectId);
 
   // Load parcel data from effective PNU
   useEffect(() => {
-    if (!effectivePnu) return;
+    if (!effectivePnu) { setParcelCenter(null); return; }
     fetchParcelByPnu(effectivePnu).then((info) => {
-      if (info) setParcelInfo(info);
+      if (info) {
+        setParcelInfo(info);
+        if (info.centroidLat && info.centroidLng) {
+          setParcelCenter({ lat: info.centroidLat, lng: info.centroidLng });
+        }
+      }
     });
-  }, [effectivePnu]);
+  }, [effectivePnu, setParcelCenter]);
 
   // Build regulation input from parcel info or use defaults
   const parcel: ParcelInput = useMemo(() => {
@@ -99,7 +111,7 @@ export default function BuilderPage() {
     }
   }, [regulation, setMaxFloors]);
 
-  // Save function
+  // Save function (수동 저장 전용)
   const saveToServer = useCallback(async (pl: ModulePlacement[]) => {
     setSaveStatus('saving');
     try {
@@ -109,6 +121,8 @@ export default function BuilderPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           parcelPnu: effectivePnu ?? undefined,
+          appraisalValue,
+          minBidPrice,
           ...stats,
           placements: pl.map((p) => ({
             moduleId: p.moduleId,
@@ -123,6 +137,7 @@ export default function BuilderPage() {
         }),
       });
       if (res.ok) {
+        existsInDbRef.current = true;
         setSaveStatus('saved');
         setLastSavedAt(new Date().toLocaleTimeString('ko-KR'));
         setTimeout(() => setSaveStatus('idle'), 2000);
@@ -132,12 +147,13 @@ export default function BuilderPage() {
     } catch {
       setSaveStatus('error');
     }
-  }, [projectId, effectivePnu]);
+  }, [projectId, effectivePnu, appraisalValue, minBidPrice]);
 
   // Load project from DB
   useEffect(() => {
     // 프로젝트 전환: 이전 데이터 즉시 클리어, autosave 차단
     loadedRef.current = false;
+    existsInDbRef.current = false;
     projectIdRef.current = projectId;
     setProjectId(projectId);
     loadPlacements([]);
@@ -154,9 +170,16 @@ export default function BuilderPage() {
         // 로드 완료 전에 다른 프로젝트로 전환됐으면 무시
         if (projectIdRef.current !== projectId) return;
         if (!data) { loadedRef.current = true; return; }
+        existsInDbRef.current = true;
 
         if (data.name) setProjectName(data.name);
         if (data.parcelPnu) setDbParcelPnu(data.parcelPnu);
+
+        // 감정가: URL 쿼리 우선, 없으면 DB 값 사용
+        const av = queryAppraisal || data.appraisalValue || 0;
+        const mb = queryMinBid || data.minBidPrice || 0;
+        setAppraisalValue(av);
+        setMinBidPrice(mb);
 
         const placements = Array.isArray(data.placements) ? data.placements : [];
         loadPlacements(
@@ -177,57 +200,22 @@ export default function BuilderPage() {
       .catch(() => { loadedRef.current = true; });
   }, [projectId, setProjectId, loadPlacements, setProjectName]);
 
-  // Auto-save
+  // Refs for manual save
   const placementsRef = useRef(placements);
   placementsRef.current = placements;
-  const effectivePnuRef = useRef(effectivePnu);
-  effectivePnuRef.current = effectivePnu;
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      // DB 로드 완료 전에는 저장하지 않음
-      if (!loadedRef.current) return;
-      saveToServer(placementsRef.current);
-    }, AUTOSAVE_INTERVAL);
-    return () => clearInterval(interval);
-  }, [saveToServer]);
-
-  // Save on unmount only — projectId 변경 시에는 저장하지 않음 (이미 autosave가 처리)
-  useEffect(() => {
-    return () => {
-      // 로드 완료 전이면 저장하지 않음
-      if (!loadedRef.current) return;
-      const pid = projectIdRef.current;
-      const pl = placementsRef.current;
-      const pnu = effectivePnuRef.current;
-      const stats = computeStats(pl);
-      const body = JSON.stringify({
-        parcelPnu: pnu ?? undefined,
-        ...stats,
-        placements: pl.map((p) => ({
-          moduleId: p.moduleId,
-          gridX: p.gridX,
-          gridY: p.gridY,
-          gridZ: p.gridZ,
-          rotation: p.rotation,
-          floor: p.floor,
-          materialId: p.materialId ?? null,
-          customColor: p.customColor ?? null,
-        })),
-      });
-      fetch(`/api/projects/${pid}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body,
-        keepalive: true,
-      }).catch(() => { /* ignore */ });
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Manual save (exposed to PropertyPanel via store)
   const manualSave = useCallback(() => {
     saveToServer(placementsRef.current);
+  }, [saveToServer]);
+
+  // 기존 프로젝트 5분 자동저장
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!loadedRef.current || !existsInDbRef.current) return;
+      saveToServer(placementsRef.current);
+    }, 300_000);
+    return () => clearInterval(interval);
   }, [saveToServer]);
 
   // Rename project
@@ -262,15 +250,38 @@ export default function BuilderPage() {
   return (
     <div className="flex flex-col overflow-hidden" style={{ height: 'calc(100vh - 3.5rem)' }}>
       {/* Parcel info banner */}
-      {parcelInfo && (
-        <div className="flex items-center gap-3 border-b border-slate-200 bg-blue-50 px-4 py-2 text-sm">
-          <span className="font-medium text-blue-900">{parcelInfo.address}</span>
-          <span className="text-blue-700">|</span>
-          <span className="text-blue-700">{parcelInfo.area.toFixed(1)}m²</span>
-          <span className="text-blue-700">|</span>
-          <span className="text-blue-700">
-            건폐율 {parcelInfo.regulation?.maxCoverageRatio}% / 용적률 {parcelInfo.regulation?.maxFloorAreaRatio}%
-          </span>
+      {(parcelInfo || appraisalValue > 0) && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-200 bg-blue-50 px-4 py-2 text-sm">
+          {parcelInfo && (
+            <>
+              <span className="font-medium text-blue-900">{parcelInfo.address}</span>
+              <span className="text-blue-700">|</span>
+              <span className="text-blue-700">{parcelInfo.area.toFixed(1)}m²</span>
+              <span className="text-blue-700">|</span>
+              <span className="text-blue-700">
+                건폐율 {parcelInfo.regulation?.maxCoverageRatio}% / 용적률 {parcelInfo.regulation?.maxFloorAreaRatio}%
+              </span>
+              {(parcelInfo.officialPrice != null && parcelInfo.officialPrice > 0) && (
+                <>
+                  <span className="text-blue-700">|</span>
+                  <span className="text-blue-700">
+                    공시지가 {formatWon(parcelInfo.officialPrice)}/m²
+                  </span>
+                </>
+              )}
+            </>
+          )}
+          {appraisalValue > 0 && (
+            <>
+              {parcelInfo && <span className="text-blue-700">|</span>}
+              <span className="font-medium text-red-600">
+                감정가 {formatWon(appraisalValue)}
+                {minBidPrice > 0 && (
+                  <span className="text-red-400"> (최저 {formatWon(minBidPrice)})</span>
+                )}
+              </span>
+            </>
+          )}
         </div>
       )}
 

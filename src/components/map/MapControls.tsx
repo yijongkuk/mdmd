@@ -4,6 +4,8 @@ import { useState, useRef, useEffect } from 'react';
 import { Plus, Minus, Locate, Layers, SlidersHorizontal } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
+export type MapType = 'roadmap' | 'skyview' | 'hybrid';
+
 interface MapControlsProps {
   onZoomIn: () => void;
   onZoomOut: () => void;
@@ -13,8 +15,16 @@ interface MapControlsProps {
   filterOpen: boolean;
   onToggleFilter: () => void;
   hasActiveFilters: boolean;
+  mapType: MapType;
+  onMapTypeChange: (type: MapType) => void;
   className?: string;
 }
+
+const MAP_TYPE_OPTIONS: { value: MapType; label: string }[] = [
+  { value: 'roadmap', label: '일반지도' },
+  { value: 'skyview', label: '위성지도' },
+  { value: 'hybrid', label: '하이브리드' },
+];
 
 export function MapControls({
   onZoomIn,
@@ -25,6 +35,8 @@ export function MapControls({
   filterOpen,
   onToggleFilter,
   hasActiveFilters,
+  mapType,
+  onMapTypeChange,
   className,
 }: MapControlsProps) {
   const [layerOpen, setLayerOpen] = useState(false);
@@ -57,6 +69,27 @@ export function MapControls({
         />
         {layerOpen && (
           <div className="absolute left-full top-0 ml-2 w-48 rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+            <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+              지도 유형
+            </p>
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden mb-3">
+              {MAP_TYPE_OPTIONS.map(({ value, label }) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => onMapTypeChange(value)}
+                  className={cn(
+                    'flex-1 px-1.5 py-1.5 text-[11px] font-medium transition-colors',
+                    value !== 'roadmap' && 'border-l border-slate-200',
+                    mapType === value
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-white text-slate-600 hover:bg-slate-50'
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
               레이어
             </p>

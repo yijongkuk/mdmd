@@ -20,6 +20,7 @@ interface ParcelData {
 // ─── Parcel data cache (persists across renders) ─────────────
 const parcelCache = new Map<string, ParcelData>();
 
+
 // ─── Concurrent fetch limiter ────────────────────────────────
 async function fetchConcurrent<T>(
   items: T[],
@@ -202,7 +203,10 @@ export const AuctionOverlay = memo(function AuctionOverlay({
   const elementByIdRef = useRef<Map<string, HTMLDivElement>>(new Map());
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const polygonsRef = useRef<any[]>([]);
-  const abortRef = useRef(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const selPolygonsRef = useRef<any[]>([]); // selection-specific polygons
+  // Generation counter for aborting stale async polygon fetches
+  const genRef = useRef(0);
   // Track current selectedId in ref to avoid stale closures in drawPolygon
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
@@ -210,23 +214,32 @@ export const AuctionOverlay = memo(function AuctionOverlay({
   onSelectRef.current = onSelect;
 
   // ─── Fetch parcel data, draw polygon, relocate marker to centroid ───
+  // Returns drawn overlay objects (polygon + hatch lines) for external management
   const drawPolygon = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    async (property: AuctionProperty, map: any, kakao: any) => {
-      if (property.lat == null || property.lng == null) return;
+    async (property: AuctionProperty, map: any, kakao: any, gen?: number): Promise<any[]> => {
+      if (property.lat == null || property.lng == null) return [];
 
-      const cacheKey = `${property.lat.toFixed(6)},${property.lng.toFixed(6)}`;
+      // PNU 있으면 PNU 기반 조회 (정확), 없으면 좌표 기반
+      const cacheKey = property.pnu
+        ? `pnu:${property.pnu}`
+        : `${property.lat.toFixed(6)},${property.lng.toFixed(6)}`;
 
       // Try cache first
       let parcelData: ParcelData | undefined = parcelCache.get(cacheKey);
       if (!parcelData) {
         try {
-          const res = await fetch(
-            `/api/land/parcel-info?lat=${property.lat}&lng=${property.lng}`,
-          );
+          // PNU + 주소 + 좌표 모두 전달 → 서버에서 fallback 체인 사용
+          const params = new URLSearchParams();
+          if (property.pnu) params.set('pnu', property.pnu);
+          if (property.address) params.set('address', property.address);
+          params.set('lat', String(property.lat));
+          params.set('lng', String(property.lng));
+          const url = `/api/land/parcel-info?${params.toString()}`;
+          const res = await fetch(url);
           if (!res.ok) {
             parcelCache.set(cacheKey, { geometry: null, centroidLat: null, centroidLng: null });
-            return;
+            return [];
           }
           const data = await res.json();
           parcelData = {
@@ -237,56 +250,71 @@ export const AuctionOverlay = memo(function AuctionOverlay({
           parcelCache.set(cacheKey, parcelData);
         } catch {
           parcelCache.set(cacheKey, { geometry: null, centroidLat: null, centroidLng: null });
-          return;
+          return [];
         }
       }
 
-      if (abortRef.current) return;
+      // Generation-based abort: if gen was provided and doesn't match current, skip drawing
+      if (gen != null && genRef.current !== gen) return [];
 
       // ── Relocate marker to parcel centroid ──
       if (parcelData.centroidLat && parcelData.centroidLng) {
         const marker = markerByIdRef.current.get(property.id);
         if (marker) {
-          marker.setPosition(
-            new kakao.maps.LatLng(parcelData.centroidLat, parcelData.centroidLng),
-          );
+          try {
+            marker.setPosition(
+              new kakao.maps.LatLng(parcelData.centroidLat, parcelData.centroidLng),
+            );
+          } catch { /* CustomOverlay might not support setPosition in some versions */ }
         }
       }
 
-      // ── Draw polygon ──
-      if (!parcelData.geometry) return;
+      if (!parcelData.geometry) return [];
 
       const coords = parcelData.geometry.coordinates[0];
-      const path = coords.map(
-        ([lng, lat]: number[]) => new kakao.maps.LatLng(lat, lng),
-      );
+      if (!coords || coords.length < 3) return [];
 
-      const isSelected = property.id === selectedIdRef.current;
-      const polygon = new kakao.maps.Polygon({
-        path,
-        strokeWeight: isSelected ? 3 : 2,
-        strokeColor: isSelected ? '#3b82f6' : '#ef4444',
-        strokeOpacity: 0.9,
-        fillColor: isSelected ? '#3b82f6' : '#ef4444',
-        fillOpacity: isSelected ? 0.4 : 0.2,
-      });
-      polygon.setMap(map);
+      try {
+        const path = coords.map(
+          ([lng, lat]: number[]) => new kakao.maps.LatLng(lat, lng),
+        );
 
-      kakao.maps.event.addListener(polygon, 'click', () => onSelectRef.current(property.id));
-      kakao.maps.event.addListener(polygon, 'mouseover', () => {
-        polygon.setOptions({ fillOpacity: isSelected ? 0.5 : 0.35, strokeWeight: 3 });
-      });
-      kakao.maps.event.addListener(polygon, 'mouseout', () => {
-        polygon.setOptions({
-          fillOpacity: isSelected ? 0.4 : 0.2,
+        const isSelected = property.id === selectedIdRef.current;
+        const strokeColor = isSelected ? '#3b82f6' : '#ef4444';
+        const fillColor = isSelected ? '#3b82f6' : '#ef4444';
+
+        // 대지경계: 실선 폴리곤
+        const polygon = new kakao.maps.Polygon({
+          path,
           strokeWeight: isSelected ? 3 : 2,
+          strokeColor,
+          strokeOpacity: 1,
+          fillColor,
+          fillOpacity: isSelected ? 0.3 : 0.15,
         });
-      });
+        polygon.setMap(map);
 
-      if (!abortRef.current) {
-        polygonsRef.current.push(polygon);
-      } else {
-        polygon.setMap(null);
+        kakao.maps.event.addListener(polygon, 'click', () => onSelectRef.current(property.id));
+        kakao.maps.event.addListener(polygon, 'mouseover', () => {
+          polygon.setOptions({ fillOpacity: isSelected ? 0.4 : 0.25, strokeWeight: 3 });
+        });
+        kakao.maps.event.addListener(polygon, 'mouseout', () => {
+          polygon.setOptions({
+            fillOpacity: isSelected ? 0.3 : 0.15,
+            strokeWeight: isSelected ? 3 : 2,
+          });
+        });
+
+        const drawn: unknown[] = [polygon];
+
+        if (gen != null && genRef.current !== gen) {
+          drawn.forEach((o: unknown) => (o as { setMap(m: null): void }).setMap(null));
+          return [];
+        }
+
+        return drawn;
+      } catch {
+        return [];
       }
     },
     [], // No deps — uses refs for selectedId and onSelect
@@ -297,7 +325,8 @@ export const AuctionOverlay = memo(function AuctionOverlay({
     const map = getKakaoMapInstance();
     if (!map || !window.kakao?.maps) return;
 
-    abortRef.current = false;
+    // Increment generation to abort stale async polygon fetches
+    const gen = ++genRef.current;
 
     // Clear previous overlays & polygons
     overlaysRef.current.forEach((o) => o.setMap(null));
@@ -384,16 +413,23 @@ export const AuctionOverlay = memo(function AuctionOverlay({
         elementByIdRef.current.set(property.id, el);
       });
 
-      // ── POLYGON MODE (zoom ≤ 5 = 필지 경계 표시) ──
-      if (zoomLevel <= 5 && visibleWithCoords.length > 0) {
-        // Limit polygons to max 30 in viewport to avoid excessive API calls
-        const polygonCandidates = visibleWithCoords.slice(0, 30);
-        fetchConcurrent(polygonCandidates, (p) => drawPolygon(p, map, kakao), 4);
+      // ── POLYGON MODE (zoom ≤ 4 = 필지 경계 표시, 마커 전환 후 3단계 확대) ──
+      if (zoomLevel <= 4 && visibleWithCoords.length > 0) {
+        const maxPolygons = zoomLevel <= 3 ? 30 : 15;
+        const polygonCandidates = visibleWithCoords.slice(0, maxPolygons);
+        fetchConcurrent(
+          polygonCandidates,
+          async (p) => {
+            const drawn = await drawPolygon(p, map, kakao, gen);
+            polygonsRef.current.push(...drawn);
+          },
+          4,
+        );
       }
     }
 
     return () => {
-      abortRef.current = true;
+      genRef.current++; // Invalidate ongoing async polygon fetches
       overlaysRef.current.forEach((o) => o.setMap(null));
       overlaysRef.current = [];
       markerByIdRef.current.clear();
@@ -403,25 +439,43 @@ export const AuctionOverlay = memo(function AuctionOverlay({
     };
   }, [properties, zoomLevel, drawPolygon]);
 
-  // ─── SELECTION EFFECT: update only the selected/deselected marker HTML ───
+  // ─── SELECTION EFFECT: update marker HTML + draw polygon for selected ───
   useEffect(() => {
+    const map = getKakaoMapInstance();
     const mode = getDisplayMode(zoomLevel);
-    if (mode !== 'marker') return;
 
-    // Update all markers: swap HTML only for previously selected and newly selected
-    elementByIdRef.current.forEach((el, id) => {
-      const isSelected = id === selectedId;
-      // Find matching property for this id
-      const property = properties.find((p) => p.id === id);
-      if (!property) return;
+    // Update marker HTML in marker mode
+    if (mode === 'marker') {
+      elementByIdRef.current.forEach((el, id) => {
+        const isSelected = id === selectedId;
+        const property = properties.find((p) => p.id === id);
+        if (!property) return;
+        const currentHtml = auctionMarkerHtml(property, isSelected);
+        if (el.innerHTML !== currentHtml) {
+          el.innerHTML = currentHtml;
+        }
+      });
+    }
 
-      const currentHtml = auctionMarkerHtml(property, isSelected);
-      // Only update if the HTML would differ (selected state changed)
-      if (el.innerHTML !== currentHtml) {
-        el.innerHTML = currentHtml;
+    // Clear previous selection polygons
+    selPolygonsRef.current.forEach((p) => p.setMap(null));
+    selPolygonsRef.current = [];
+
+    // Draw polygon for selected property — works in ALL zoom modes
+    if (selectedId && map && window.kakao?.maps) {
+      const selected = properties.find((p) => p.id === selectedId);
+      if (selected) {
+        drawPolygon(selected, map, window.kakao).then((drawn) => {
+          selPolygonsRef.current.push(...drawn);
+        });
       }
-    });
-  }, [selectedId, properties, zoomLevel]);
+    }
+
+    return () => {
+      selPolygonsRef.current.forEach((p) => p.setMap(null));
+      selPolygonsRef.current = [];
+    };
+  }, [selectedId, properties, zoomLevel, drawPolygon]);
 
   return null;
 });

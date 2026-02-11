@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Box, Map, FolderOpen } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { useBuilderStore } from '@/features/builder/store';
 
 const navLinks = [
   { href: '/map', label: '유휴지 탐색', icon: Map },
@@ -12,9 +13,15 @@ const navLinks = [
 
 export function Header() {
   const pathname = usePathname();
+  const parcelCenter = useBuilderStore((s) => s.parcelCenter);
 
   const isBuilder = pathname?.startsWith('/builder');
   const isMap = pathname === '/map';
+
+  // 빌더에서 유휴지 탐색 클릭 시 현재 필지 위치로 지도 이동
+  const mapHref = isBuilder && parcelCenter
+    ? `/map?lat=${parcelCenter.lat}&lng=${parcelCenter.lng}`
+    : '/map';
 
   return (
     <header className={cn(
@@ -34,7 +41,7 @@ export function Header() {
           {navLinks.map(({ href, label, icon: Icon }) => (
             <Link
               key={href}
-              href={href}
+              href={href === '/map' ? mapHref : href}
               className={cn(
                 'flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors',
                 pathname === href

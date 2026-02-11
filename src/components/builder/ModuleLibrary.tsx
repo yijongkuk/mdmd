@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useSyncExternalStore } from 'react';
+import { useState, useRef, useEffect, useSyncExternalStore } from 'react';
 import { Search } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Input } from '@/components/ui/input';
@@ -10,13 +10,139 @@ import { MODULES_BY_CATEGORY } from '@/lib/constants/modules';
 import { type ModuleCategory, type ModuleDefinition } from '@/types/builder';
 import { formatWon } from '@/lib/utils/format';
 import { useBuilderStore } from '@/features/builder/store';
-import { subscribe, getSnapshot } from '@/lib/speckle/customModules';
+import { subscribe, getSnapshot, getMeshData, isCustomModule } from '@/lib/speckle/customModules';
 
 const CATEGORY_TAB_MAP: { value: ModuleCategory; label: string }[] = [
   { value: 'STRUCTURAL', label: '구조' },
   { value: 'FUNCTIONAL', label: '기능' },
   { value: 'DESIGN', label: '디자인' },
 ];
+
+// ===== Isometric thumbnail renderer =====
+
+/** 등각 투영: 3D → 2D (Y-up) */
+function isoProject(x: number, y: number, z: number): [number, number] {
+  const cos30 = 0.866;
+  const sin30 = 0.5;
+  return [
+    (x - z) * cos30,
+    -(x + z) * sin30 - y,
+  ];
+}
+
+function ModuleThumbnail({ module }: { module: ModuleDefinition }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const size = 48;
+  const dpr = typeof window !== 'undefined' ? Math.min(window.devicePixelRatio, 2) : 1;
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    canvas.width = size * dpr;
+    canvas.height = size * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, size, size);
+
+    const meshData = isCustomModule(module.id) ? getMeshData(module.id) : null;
+
+    if (meshData && meshData.meshes.length > 0) {
+      // Speckle 커스텀 모듈: 실제 메시의 엣지 렌더링
+      const bb = meshData.boundingBox.size;
+      const maxDim = Math.max(bb[0], bb[1], bb[2], 0.01);
+      const scale = (size * 0.35) / maxDim;
+      const cx = bb[0] / 2, cy = bb[1] / 2, cz = bb[2] / 2;
+
+      ctx.save();
+      ctx.translate(size / 2, size / 2);
+
+      // 삼각형 면을 채우기
+      ctx.fillStyle = '#e2e8f0';
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 0.5;
+
+      for (const part of meshData.meshes) {
+        const verts = part.vertices;
+        const idxs = part.indices;
+        for (let i = 0; i < idxs.length; i += 3) {
+          const i0 = idxs[i], i1 = idxs[i + 1], i2 = idxs[i + 2];
+          const [ax, ay] = isoProject(
+            (verts[i0 * 3] - cx) * scale,
+            (verts[i0 * 3 + 1] - cy) * scale,
+            (verts[i0 * 3 + 2] - cz) * scale,
+          );
+          const [bx, by] = isoProject(
+            (verts[i1 * 3] - cx) * scale,
+            (verts[i1 * 3 + 1] - cy) * scale,
+            (verts[i1 * 3 + 2] - cz) * scale,
+          );
+          const [ccx, ccy] = isoProject(
+            (verts[i2 * 3] - cx) * scale,
+            (verts[i2 * 3 + 1] - cy) * scale,
+            (verts[i2 * 3 + 2] - cz) * scale,
+          );
+          ctx.beginPath();
+          ctx.moveTo(ax, ay);
+          ctx.lineTo(bx, by);
+          ctx.lineTo(ccx, ccy);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    } else {
+      // 기본 BoxGeometry: 등각 박스 렌더링
+      const { width: w, height: h, depth: d } = module;
+      const maxDim = Math.max(w, h, d, 0.01);
+      const scale = (size * 0.35) / maxDim;
+      const hw = (w * scale) / 2, hh = (h * scale) / 2, hd = (d * scale) / 2;
+
+      // 8 꼭짓점 (Y-up, 중심 기준)
+      const corners = [
+        [-hw, -hh, -hd], [hw, -hh, -hd], [hw, -hh, hd], [-hw, -hh, hd],
+        [-hw, hh, -hd], [hw, hh, -hd], [hw, hh, hd], [-hw, hh, hd],
+      ].map(([cx, cy, cz]) => isoProject(cx, cy, cz));
+
+      ctx.save();
+      ctx.translate(size / 2, size / 2);
+
+      // 보이는 3면 (등각 뷰에서)
+      const faces = [
+        { verts: [4, 5, 6, 7], fill: '#e2e8f0' },  // top
+        { verts: [0, 3, 7, 4], fill: '#cbd5e1' },  // left
+        { verts: [0, 1, 5, 4], fill: '#b4bfcc' },  // right (어두운 면)
+      ];
+
+      for (const face of faces) {
+        ctx.beginPath();
+        ctx.moveTo(corners[face.verts[0]][0], corners[face.verts[0]][1]);
+        for (let i = 1; i < face.verts.length; i++) {
+          ctx.lineTo(corners[face.verts[i]][0], corners[face.verts[i]][1]);
+        }
+        ctx.closePath();
+        ctx.fillStyle = face.fill;
+        ctx.fill();
+        ctx.strokeStyle = '#94a3b8';
+        ctx.lineWidth = 0.8;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }, [module]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={size * dpr}
+      height={size * dpr}
+      className="flex-shrink-0 rounded"
+      style={{ width: size, height: size }}
+    />
+  );
+}
 
 function ModuleCard({ module }: { module: ModuleDefinition }) {
   const selectedModuleDefId = useBuilderStore((s) => s.selectedModuleDefId);
@@ -34,11 +160,7 @@ function ModuleCard({ module }: { module: ModuleDefinition }) {
       )}
     >
       <div className="flex items-start gap-3">
-        {/* Color swatch */}
-        <div
-          className="mt-0.5 h-8 w-8 flex-shrink-0 rounded"
-          style={{ backgroundColor: module.color }}
-        />
+        <ModuleThumbnail module={module} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-slate-900 truncate">

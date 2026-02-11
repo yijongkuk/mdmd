@@ -60,6 +60,21 @@ function parseAreaFromGoods(goodsNm: string | undefined): number | undefined {
   return undefined;
 }
 
+/**
+ * OnBid PNU → V-World PNU 변환
+ * OnBid 산구분: 0=일반, 1=산
+ * V-World 산구분: 1=일반, 2=산
+ * 변환: +1
+ */
+function normalizeOnbidPnu(pnu: string): string {
+  if (pnu.length !== 19) return pnu;
+  const mountain = pnu[10];
+  if (mountain === '0' || mountain === '1') {
+    return pnu.slice(0, 10) + String(Number(mountain) + 1) + pnu.slice(11);
+  }
+  return pnu;
+}
+
 function mapItem(item: OnbidItem): AuctionProperty {
   return {
     id: String(item.CLTR_MNMT_NO ?? ''),
@@ -73,7 +88,7 @@ function mapItem(item: OnbidItem): AuctionProperty {
     itemType: String(item.CTGR_FULL_NM ?? ''),
     status: String(item.PBCT_CDTN_NM ?? ''),
     onbidUrl: String(item.CLTR_HMPG_ADRS ?? ''),
-    pnu: item.LDNM_PNU ? String(item.LDNM_PNU) : undefined,
+    pnu: item.LDNM_PNU ? normalizeOnbidPnu(String(item.LDNM_PNU)) : undefined,
     area: parseAreaFromGoods(item.GOODS_NM),
   };
 }

@@ -6,6 +6,8 @@ import type { MapBounds } from '@/types/land';
 interface KakaoMapProps {
   onBoundsChange: (bounds: MapBounds) => void;
   onZoomChange: (level: number) => void;
+  initialCenter?: { lat: number; lng: number };
+  initialLevel?: number;
   children?: React.ReactNode;
 }
 
@@ -25,11 +27,35 @@ declare global {
         };
         Point: new (x: number, y: number) => { x: number; y: number };
         Polygon: new (options: Record<string, unknown>) => KakaoPolygon;
+        Polyline: new (options: Record<string, unknown>) => KakaoPolyline;
         CustomOverlay: new (options: Record<string, unknown>) => KakaoCustomOverlay;
         LatLngBounds: new () => { extend(latlng: unknown): void };
+        MapTypeId: {
+          ROADMAP: number;
+          SKYVIEW: number;
+          HYBRID: number;
+        };
+        services: {
+          Status: { OK: string; ZERO_RESULT: string; ERROR: string };
+          Geocoder: new () => KakaoGeocoder;
+        };
       };
     };
   }
+}
+
+interface KakaoAddressDetail {
+  b_code: string;
+  mountain_yn: string;
+  main_address_no: string;
+  sub_address_no: string;
+}
+
+interface KakaoGeocoder {
+  addressSearch(
+    address: string,
+    callback: (result: Array<{ x: string; y: string; address_name: string; address?: KakaoAddressDetail }>, status: string) => void,
+  ): void;
 }
 
 interface KakaoMapInstance {
@@ -41,6 +67,7 @@ interface KakaoMapInstance {
   setLevel(level: number): void;
   setCenter(latlng: unknown): void;
   getCenter(): { getLat(): number; getLng(): number };
+  setMapTypeId(mapTypeId: number): void;
   getProjection(): {
     pointFromCoords(latlng: unknown): { x: number; y: number };
     coordsFromPoint(point: { x: number; y: number }): { getLat(): number; getLng(): number };
@@ -52,11 +79,15 @@ interface KakaoPolygon {
   setOptions(options: Record<string, unknown>): void;
 }
 
+interface KakaoPolyline {
+  setMap(map: KakaoMapInstance | null): void;
+}
+
 interface KakaoCustomOverlay {
   setMap(map: KakaoMapInstance | null): void;
 }
 
-export function KakaoMap({ onBoundsChange, onZoomChange, children }: KakaoMapProps) {
+export function KakaoMap({ onBoundsChange, onZoomChange, initialCenter, initialLevel, children }: KakaoMapProps) {
   const [sdkReady, setSdkReady] = useState(false);
   const [sdkFailed, setSdkFailed] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -95,10 +126,11 @@ export function KakaoMap({ onBoundsChange, onZoomChange, children }: KakaoMapPro
     if (!sdkReady || !containerRef.current || mapRef.current) return;
 
     const { kakao } = window;
-    const center = new kakao.maps.LatLng(KOREA_CENTER.lat, KOREA_CENTER.lng);
+    const c = initialCenter ?? KOREA_CENTER;
+    const center = new kakao.maps.LatLng(c.lat, c.lng);
     const map = new kakao.maps.Map(containerRef.current, {
       center,
-      level: DEFAULT_LEVEL,
+      level: initialLevel ?? DEFAULT_LEVEL,
     });
     mapRef.current = map;
 

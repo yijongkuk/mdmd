@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { geocodeAddress } from '@/lib/api/vworld';
+import { getParcelByPnu } from '@/lib/api/vworld';
 
 const MAX_BATCH_SIZE = 100;
 const CONCURRENCY = 20;
@@ -23,27 +23,48 @@ async function runConcurrent<T, R>(
   return results;
 }
 
+interface GeoItem {
+  address: string;
+  pnu?: string;
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const addresses: string[] = body?.addresses;
 
-    if (!Array.isArray(addresses) || addresses.length === 0) {
-      return NextResponse.json({ error: 'addresses array required' }, { status: 400 });
+    // 새 형식: { items: [{address, pnu?}] } 또는 기존 형식: { addresses: string[] }
+    let items: GeoItem[];
+    if (Array.isArray(body?.items)) {
+      items = body.items;
+    } else if (Array.isArray(body?.addresses)) {
+      items = body.addresses.map((a: string) => ({ address: a }));
+    } else {
+      return NextResponse.json({ error: 'items or addresses array required' }, { status: 400 });
     }
 
-    if (addresses.length > MAX_BATCH_SIZE) {
+    if (items.length === 0) {
+      return NextResponse.json({ results: {} });
+    }
+
+    if (items.length > MAX_BATCH_SIZE) {
       return NextResponse.json(
-        { error: `Max ${MAX_BATCH_SIZE} addresses per request` },
+        { error: `Max ${MAX_BATCH_SIZE} items per request` },
         { status: 400 },
       );
     }
 
     const coords = await runConcurrent(
-      addresses,
-      async (addr) => {
-        const result = await geocodeAddress(addr);
-        return { address: addr, coords: result };
+      items,
+      async (item) => {
+        // PNU → V-World 필지 경계 조회 → 폴리곤 중심점 (가장 정확)
+        // 주소 fallback은 클라이언트 Kakao 지오코딩이 담당
+        if (item.pnu) {
+          const parcel = await getParcelByPnu(item.pnu);
+          if (parcel?.centroidLat && parcel?.centroidLng) {
+            return { address: item.address, coords: { lat: parcel.centroidLat, lng: parcel.centroidLng } };
+          }
+        }
+        return { address: item.address, coords: null };
       },
       CONCURRENCY,
     );

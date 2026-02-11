@@ -46,4 +46,5 @@ export interface AuctionFilters {
   region: 'all' | 'metro';
   searchQuery: string;
   dataSources: string[];
+  excludeLowUnitPrice: boolean;  // 단가 1만원/m² 미만 제외
 }
