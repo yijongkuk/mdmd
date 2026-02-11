@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
+import { OrbitControls, GizmoHelper, GizmoViewcube } from '@react-three/drei';
 import * as THREE from 'three';
 import { useBuilderStore, type FloorAreaInfo } from '@/features/builder/store';
 import { getModuleById } from '@/lib/constants/modules';
@@ -18,7 +18,6 @@ import { RegulationBoundary } from './RegulationBoundary';
 import { RegulationBoundaryPolygon } from './RegulationBoundaryPolygon';
 import { BuildableVolume } from './BuildableVolume';
 import { SolarEnvelope } from './SolarEnvelope';
-import { NorthIndicator } from './NorthIndicator';
 import { TerrainMesh, type TerrainElevationGrid } from './TerrainMesh';
 import { SurroundingBuildings } from './SurroundingBuildings';
 import { SurroundingRoads } from './SurroundingRoads';
@@ -162,7 +161,14 @@ function AnimatedGizmo({ rightSidebarOpen }: { rightSidebarOpen: boolean }) {
 
   return (
     <GizmoHelper alignment="top-right" margin={[marginX, 80]}>
-      <GizmoViewport axisColors={['#ef4444', '#22c55e', '#3b82f6']} labelColor="white" />
+      <GizmoViewcube
+        faces={['동', '서', '위', '아래', '남', '북']}
+        color="#f1f5f9"
+        textColor="#334155"
+        strokeColor="#94a3b8"
+        hoverColor="#dbeafe"
+        opacity={0.9}
+      />
     </GizmoHelper>
   );
 }
@@ -617,12 +623,6 @@ function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showS
               <SolarEnvelope polygon={regulationPolygon} maxHeight={boundaryHeight} />
             )}
 
-            {/* North indicator (compass) */}
-            {parcelBounds && (
-              <NorthIndicator
-                position={[parcelBounds.minX - 3, 0, parcelBounds.maxZ + 1]}
-              />
-            )}
           </group>
         </group>
       </group>
