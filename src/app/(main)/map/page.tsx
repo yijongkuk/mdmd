@@ -66,7 +66,6 @@ function MapPageInner() {
 
   const [bounds, setBounds] = useState<MapBounds | null>(null);
   const [zoomLevel, setZoomLevel] = useState(11);
-  const [showAuctions, setShowAuctions] = useState(true);
   const [selectedAuctionId, setSelectedAuctionId] = useState<string | null>(null);
   const [filters, setFilters] = useState<AuctionFilters>(DEFAULT_FILTERS);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
@@ -75,7 +74,7 @@ function MapPageInner() {
 
   // OnBid 매각/임대 물건 — 실제 공매·매각·임대 유휴지만 표시
   const { properties: auctionProperties, isLoading: auctionsLoading, loadingRegion, progress } =
-    useAuctionProperties(bounds, showAuctions, zoomLevel);
+    useAuctionProperties(bounds, true, zoomLevel);
 
   // Client-side filtering (공통 필터 로직)
   const applyFilters = useCallback((p: AuctionProperty) => {
@@ -145,11 +144,6 @@ function MapPageInner() {
 
   const handleCloseAuctionPanel = useCallback(() => {
     setSelectedAuctionId(null);
-  }, []);
-
-  const handleToggleAuctions = useCallback((show: boolean) => {
-    setShowAuctions(show);
-    if (!show) setSelectedAuctionId(null);
   }, []);
 
   const handleZoomIn = useCallback(() => {
@@ -248,8 +242,6 @@ function MapPageInner() {
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}
         onReset={handleReset}
-        showAuctions={showAuctions}
-        onToggleAuctions={handleToggleAuctions}
         filterOpen={filterPanelOpen}
         onToggleFilter={handleToggleFilter}
         mapType={mapType}
@@ -285,25 +277,21 @@ function MapPageInner() {
       )}
 
       {/* Auction overlay — 매각/임대 물건 (전체, Kakao 자체 클리핑) */}
-      {showAuctions && (
-        <AuctionOverlay
-          properties={overlayProperties}
-          selectedId={selectedAuctionId}
-          onSelect={handleSelectAuction}
-          zoomLevel={zoomLevel}
-        />
-      )}
+      <AuctionOverlay
+        properties={overlayProperties}
+        selectedId={selectedAuctionId}
+        onSelect={handleSelectAuction}
+        zoomLevel={zoomLevel}
+      />
 
       {/* Bottom list */}
-      {showAuctions && (
-        <AuctionBottomList
-          properties={filteredProperties}
-          selectedId={selectedAuctionId}
-          onSelect={handleSelectAuction}
-          collapsed={listCollapsed}
-          onToggleCollapse={() => setListCollapsed((v) => !v)}
-        />
-      )}
+      <AuctionBottomList
+        properties={filteredProperties}
+        selectedId={selectedAuctionId}
+        onSelect={handleSelectAuction}
+        collapsed={listCollapsed}
+        onToggleCollapse={() => setListCollapsed((v) => !v)}
+      />
 
       {/* Detail panel - auction */}
       <AuctionInfoPanel

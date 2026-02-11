@@ -10,8 +10,6 @@ interface MapControlsProps {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onReset: () => void;
-  showAuctions: boolean;
-  onToggleAuctions: (show: boolean) => void;
   filterOpen: boolean;
   onToggleFilter: () => void;
   hasActiveFilters: boolean;
@@ -30,8 +28,6 @@ export function MapControls({
   onZoomIn,
   onZoomOut,
   onReset,
-  showAuctions,
-  onToggleAuctions,
   filterOpen,
   onToggleFilter,
   hasActiveFilters,
@@ -90,18 +86,6 @@ export function MapControls({
                 </button>
               ))}
             </div>
-            <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-              레이어
-            </p>
-            <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-slate-50">
-              <input
-                type="checkbox"
-                checked={showAuctions}
-                onChange={(e) => onToggleAuctions(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-slate-300 text-red-500 focus:ring-red-500"
-              />
-              <span className="text-sm text-slate-700">공매 물건 표시</span>
-            </label>
           </div>
         )}
       </div>
