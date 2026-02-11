@@ -16,7 +16,7 @@ import { BoxSelectOverlay } from '@/components/builder/BoxSelectOverlay';
 import { FLOOR_HEIGHT } from '@/lib/constants/grid';
 import { getModuleById } from '@/lib/constants/modules';
 import { getMaterialById } from '@/lib/constants/materials';
-import { formatWon } from '@/lib/utils/format';
+import { formatWon, formatDate } from '@/lib/utils/format';
 import type { ParcelInput } from '@/features/regulations/engine';
 import type { ParcelInfo } from '@/types/land';
 import type { ModulePlacement } from '@/types/builder';
@@ -49,6 +49,8 @@ export default function BuilderPage() {
   const parcelPnu = searchParams.get('parcelPnu');
   const queryAppraisal = Number(searchParams.get('appraisalValue')) || 0;
   const queryMinBid = Number(searchParams.get('minBidPrice')) || 0;
+  const queryBidStart = searchParams.get('bidStartDate') ?? '';
+  const queryBidEnd = searchParams.get('bidEndDate') ?? '';
 
   const setProjectId = useBuilderStore((s) => s.setProjectId);
   const setProjectName = useBuilderStore((s) => s.setProjectName);
@@ -63,6 +65,8 @@ export default function BuilderPage() {
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [appraisalValue, setAppraisalValue] = useState(queryAppraisal);
   const [minBidPrice, setMinBidPrice] = useState(queryMinBid);
+  const [bidStartDate, setBidStartDate] = useState(queryBidStart);
+  const [bidEndDate, setBidEndDate] = useState(queryBidEnd);
   // effectivePnu: URL 쿼리 우선, 없으면 DB에서 로드한 값 사용
   const [dbParcelPnu, setDbParcelPnu] = useState<string | null>(null);
   const effectivePnu = parcelPnu ?? dbParcelPnu;
@@ -123,6 +127,8 @@ export default function BuilderPage() {
           parcelPnu: effectivePnu ?? undefined,
           appraisalValue,
           minBidPrice,
+          bidStartDate: bidStartDate || undefined,
+          bidEndDate: bidEndDate || undefined,
           ...stats,
           placements: pl.map((p) => ({
             moduleId: p.moduleId,
@@ -147,7 +153,7 @@ export default function BuilderPage() {
     } catch {
       setSaveStatus('error');
     }
-  }, [projectId, effectivePnu, appraisalValue, minBidPrice]);
+  }, [projectId, effectivePnu, appraisalValue, minBidPrice, bidStartDate, bidEndDate]);
 
   // Load project from DB
   useEffect(() => {
@@ -175,11 +181,13 @@ export default function BuilderPage() {
         if (data.name) setProjectName(data.name);
         if (data.parcelPnu) setDbParcelPnu(data.parcelPnu);
 
-        // 감정가: URL 쿼리 우선, 없으면 DB 값 사용
+        // 감정가/입찰기간: URL 쿼리 우선, 없으면 DB 값 사용
         const av = queryAppraisal || data.appraisalValue || 0;
         const mb = queryMinBid || data.minBidPrice || 0;
         setAppraisalValue(av);
         setMinBidPrice(mb);
+        setBidStartDate(queryBidStart || data.bidStartDate || '');
+        setBidEndDate(queryBidEnd || data.bidEndDate || '');
 
         const placements = Array.isArray(data.placements) ? data.placements : [];
         loadPlacements(
@@ -279,6 +287,14 @@ export default function BuilderPage() {
                 {minBidPrice > 0 && (
                   <span className="text-red-400"> (최저 {formatWon(minBidPrice)})</span>
                 )}
+              </span>
+            </>
+          )}
+          {bidEndDate && (
+            <>
+              <div className="flex-1" />
+              <span className="text-blue-700">
+                입찰 {bidStartDate ? `${formatDate(bidStartDate)} ~ ` : ''}{formatDate(bidEndDate)}
               </span>
             </>
           )}

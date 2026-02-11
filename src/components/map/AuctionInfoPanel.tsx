@@ -70,6 +70,8 @@ export const AuctionInfoPanel = memo(function AuctionInfoPanel({ property, onClo
     params.set('auctionId', property.id);
     if (property.appraisalValue > 0) params.set('appraisalValue', String(property.appraisalValue));
     if (property.minBidPrice > 0) params.set('minBidPrice', String(property.minBidPrice));
+    if (property.bidStartDate) params.set('bidStartDate', property.bidStartDate);
+    if (property.bidEndDate) params.set('bidEndDate', property.bidEndDate);
     router.push(`/builder/${newProjectId}?${params.toString()}`);
   };
 

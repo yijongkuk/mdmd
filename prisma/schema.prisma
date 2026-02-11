@@ -27,6 +27,9 @@ model Project {
   appraisalValue Float @default(0) // 감정가 (원)
   minBidPrice    Float @default(0) // 최저입찰가 (원)
 
+  bidStartDate String? // 입찰 시작일 (YYYY-MM-DD 등)
+  bidEndDate   String? // 입찰 종료일
+
   gridSizeM Float @default(0.6) // 그리드 크기 (m)
 
   totalModules Int   @default(0)
