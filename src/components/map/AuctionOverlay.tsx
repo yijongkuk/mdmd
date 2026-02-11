@@ -439,7 +439,7 @@ export const AuctionOverlay = memo(function AuctionOverlay({
     );
   }, [drawPolygon]);
 
-  // Register idle listener once when map is ready, re-trigger on zoom changes
+  // Register idle listener once when map is ready, re-trigger on zoom/data changes
   useEffect(() => {
     const map = getKakaoMapInstance();
     if (!map || !window.kakao?.maps) return;
@@ -450,7 +450,7 @@ export const AuctionOverlay = memo(function AuctionOverlay({
       idleRegisteredRef.current = true;
     }
 
-    // Draw for current view
+    // Draw for current view (re-runs when properties load or zoom changes)
     refreshPolygons();
 
     return () => {
@@ -458,7 +458,7 @@ export const AuctionOverlay = memo(function AuctionOverlay({
       polygonsRef.current.forEach((p) => p.setMap(null));
       polygonsRef.current = [];
     };
-  }, [refreshPolygons, zoomLevel]);
+  }, [refreshPolygons, zoomLevel, properties]);
 
   // ─── MARKER HTML UPDATE: runs when properties or selectedId changes ───
   useEffect(() => {

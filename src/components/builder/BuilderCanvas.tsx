@@ -163,10 +163,9 @@ function createFaceCanvas(text: string, isNorth: boolean): HTMLCanvasElement {
   canvas.height = 128;
   const ctx = canvas.getContext('2d')!;
 
-  if (isNorth) {
-    ctx.fillStyle = 'rgba(239, 68, 68, 0.3)';
-    ctx.fillRect(0, 0, 128, 128);
-  }
+  // Semi-opaque background so back-face text doesn't bleed through
+  ctx.fillStyle = isNorth ? 'rgba(239, 68, 68, 0.35)' : 'rgba(255, 255, 255, 0.75)';
+  ctx.fillRect(0, 0, 128, 128);
 
   ctx.fillStyle = '#1e293b';
   ctx.font = 'bold 48px sans-serif';
@@ -207,7 +206,7 @@ function DirectionCube() {
           <meshBasicMaterial
             map={textures[i]}
             transparent
-            opacity={hovered === i ? 0.9 : face.isNorth ? 0.85 : 0.7}
+            opacity={hovered === i ? 0.95 : face.isNorth ? 0.9 : 0.85}
             side={THREE.DoubleSide}
             depthTest={false}
           />
