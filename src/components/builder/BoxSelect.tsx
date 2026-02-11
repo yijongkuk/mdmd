@@ -41,6 +41,7 @@ export function BoxSelect({ parcelOffset = { x: 0, z: 0 } }: BoxSelectProps) {
     gridOffset: { x: 0, z: 0 },
     terrainBaseY: 0,
     draggingPlacementId: null as string | null,
+    viewAllFloors: false,
   });
 
   // Subscribe to store changes and keep ref in sync
@@ -52,6 +53,7 @@ export function BoxSelect({ parcelOffset = { x: 0, z: 0 } }: BoxSelectProps) {
       latestRef.current.gridOffset = state.gridOffset;
       latestRef.current.terrainBaseY = state.terrainBaseY;
       latestRef.current.draggingPlacementId = state.draggingPlacementId;
+      latestRef.current.viewAllFloors = state.viewAllFloors;
     });
     // Initialize with current state
     const s = useBuilderStore.getState();
@@ -61,6 +63,7 @@ export function BoxSelect({ parcelOffset = { x: 0, z: 0 } }: BoxSelectProps) {
     latestRef.current.gridOffset = s.gridOffset;
     latestRef.current.terrainBaseY = s.terrainBaseY;
     latestRef.current.draggingPlacementId = s.draggingPlacementId;
+    latestRef.current.viewAllFloors = s.viewAllFloors;
     return unsub;
   }, []);
 
@@ -170,8 +173,9 @@ export function BoxSelect({ parcelOffset = { x: 0, z: 0 } }: BoxSelectProps) {
         const selectedIds: string[] = [];
         const vec = new THREE.Vector3();
 
+        const viewAll = latestRef.current.viewAllFloors;
         for (const p of placements) {
-          if (p.floor !== currentFloor) continue;
+          if (!viewAll && p.floor !== currentFloor) continue;
           const mod = getModuleById(p.moduleId);
           if (!mod) continue;
 

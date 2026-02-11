@@ -184,8 +184,9 @@ export const AuctionOverlay = memo(function AuctionOverlay({
   const polygonsRef = useRef<any[]>([]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const selPolygonsRef = useRef<any[]>([]); // selection-specific polygons
-  // Generation counter for aborting stale async polygon fetches
+  // Generation counters for aborting stale async polygon fetches
   const genRef = useRef(0);
+  const polyGenRef = useRef(0); // auto-polygon (idle event) 전용
   // Track current selectedId in ref to avoid stale closures in drawPolygon
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
@@ -304,16 +305,11 @@ export const AuctionOverlay = memo(function AuctionOverlay({
     const map = getKakaoMapInstance();
     if (!map || !window.kakao?.maps) return;
 
-    // Increment generation to abort stale async polygon fetches
-    const gen = ++genRef.current;
-
-    // Clear previous overlays & polygons
+    // Clear previous overlays (markers/clusters)
     overlaysRef.current.forEach((o) => o.setMap(null));
     overlaysRef.current = [];
     markerByIdRef.current.clear();
     elementByIdRef.current.clear();
-    polygonsRef.current.forEach((p) => p.setMap(null));
-    polygonsRef.current = [];
 
     const { kakao } = window;
     const mode = getDisplayMode(zoomLevel);
@@ -386,35 +382,73 @@ export const AuctionOverlay = memo(function AuctionOverlay({
         elementByIdRef.current.set(property.id, el);
       });
 
-      // ── POLYGON MODE (zoom ≤ 4 = 필지 경계 표시, 마커 전환 후 3단계 확대) ──
-      if (zoomLevel <= 4 && visibleWithCoords.length > 0) {
-        const maxPolygons = zoomLevel <= 3 ? 30 : 15;
-        const polygonCandidates = visibleWithCoords.slice(0, maxPolygons);
-        fetchConcurrent(
-          polygonCandidates,
-          async (p) => {
-            const drawn = await drawPolygon(p, map, kakao, gen);
-            polygonsRef.current.push(...drawn);
-          },
-          4,
-        );
-      }
     }
 
     return () => {
-      genRef.current++; // Invalidate ongoing async polygon fetches
       overlaysRef.current.forEach((o) => o.setMap(null));
       overlaysRef.current = [];
       markerByIdRef.current.clear();
       elementByIdRef.current.clear();
-      polygonsRef.current.forEach((p) => p.setMap(null));
-      polygonsRef.current = [];
     };
   }, [properties, zoomLevel, drawPolygon]);
 
   // Keep properties in ref for selection polygon drawing (avoids effect re-runs)
   const propertiesRef = useRef(properties);
   propertiesRef.current = properties;
+
+  // ─── AUTO-POLYGON: refresh on map move (pan + zoom) via idle event ───
+  useEffect(() => {
+    const map = getKakaoMapInstance();
+    if (!map || !window.kakao?.maps) return;
+    const { kakao } = window;
+
+    const refreshPolygons = () => {
+      // Clear existing auto-polygons
+      polygonsRef.current.forEach((p) => p.setMap(null));
+      polygonsRef.current = [];
+
+      const currentZoom = map.getLevel();
+      if (getDisplayMode(currentZoom) !== 'marker') return;
+      if (currentZoom > 5) return;
+
+      const gen = ++polyGenRef.current;
+
+      // Filter to properties in current viewport
+      const bounds = map.getBounds();
+      const sw = bounds.getSouthWest();
+      const ne = bounds.getNorthEast();
+      const inView = propertiesRef.current.filter((p) =>
+        p.lat != null && p.lng != null &&
+        p.lat! >= sw.getLat() && p.lat! <= ne.getLat() &&
+        p.lng! >= sw.getLng() && p.lng! <= ne.getLng()
+      );
+      const maxPolygons = currentZoom <= 3 ? 40 : 30;
+      fetchConcurrent(
+        inView.slice(0, maxPolygons),
+        async (p) => {
+          if (polyGenRef.current !== gen) return;
+          const drawn = await drawPolygon(p, map, kakao);
+          if (polyGenRef.current === gen) {
+            polygonsRef.current.push(...drawn);
+          } else {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            drawn.forEach((d: any) => d.setMap(null));
+          }
+        },
+        4,
+      );
+    };
+
+    kakao.maps.event.addListener(map, 'idle', refreshPolygons);
+    // Initial draw
+    refreshPolygons();
+
+    return () => {
+      polyGenRef.current++;
+      polygonsRef.current.forEach((p) => p.setMap(null));
+      polygonsRef.current = [];
+    };
+  }, [drawPolygon]);
 
   // ─── MARKER HTML UPDATE: runs when properties or selectedId changes ───
   useEffect(() => {

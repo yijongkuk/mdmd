@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useEffect } from 'react';
-import { Eye, EyeOff, Lock, Unlock, ChevronUp, ChevronDown } from 'lucide-react';
+import { Eye, EyeOff, Lock, Unlock, ChevronUp, ChevronDown, Layers } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -17,6 +17,8 @@ export function FloorNavigator() {
   const visibleFloors = useBuilderStore((s) => s.visibleFloors);
   const toggleFloorVisibility = useBuilderStore((s) => s.toggleFloorVisibility);
   const placements = useBuilderStore((s) => s.placements);
+  const viewAllFloors = useBuilderStore((s) => s.viewAllFloors);
+  const toggleViewAllFloors = useBuilderStore((s) => s.toggleViewAllFloors);
   const gridLocked = useBuilderStore((s) => s.gridLocked);
   const toggleGridLock = useBuilderStore((s) => s.toggleGridLock);
   const maxFloors = useBuilderStore((s) => s.maxFloors);
@@ -45,6 +47,26 @@ export function FloorNavigator() {
 
   return (
     <div className="flex flex-col rounded-lg border border-slate-200 bg-white shadow-sm">
+      {/* 전체 층 보기 버튼 */}
+      <div className="p-1.5 pb-0">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant={viewAllFloors ? 'default' : 'ghost'}
+              size="sm"
+              className="h-8 w-full text-xs font-medium gap-1.5"
+              onClick={toggleViewAllFloors}
+            >
+              <Layers className="h-3 w-3" />
+              전체
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="left">
+            전체 층 보기/편집 (A)
+          </TooltipContent>
+        </Tooltip>
+      </div>
+
       {/* 스크롤 위 화살표 */}
       {needsScroll && (
         <button
@@ -65,7 +87,7 @@ export function FloorNavigator() {
         } : undefined}
       >
         {floors.map((floor) => {
-          const isCurrent = floor === currentFloor;
+          const isCurrent = !viewAllFloors && floor === currentFloor;
           const isVisible = visibleFloors.includes(floor);
           const count = getFloorModuleCount(floor);
 
@@ -79,6 +101,7 @@ export function FloorNavigator() {
                     className={cn(
                       'h-8 w-12 text-xs font-medium',
                       !isCurrent && !isVisible && 'opacity-40',
+                      viewAllFloors && 'opacity-60',
                     )}
                     onClick={() => setCurrentFloor(floor)}
                   >

@@ -42,6 +42,7 @@ export function BuilderToolbar() {
   const pastePlacements = useBuilderStore((s) => s.pastePlacements);
   const removePlacement = useBuilderStore((s) => s.removePlacement);
   const selectPlacement = useBuilderStore((s) => s.selectPlacement);
+  const toggleViewAllFloors = useBuilderStore((s) => s.toggleViewAllFloors);
   const showToast = useBuilderStore((s) => s.showToast);
 
   // Keyboard shortcuts
@@ -86,6 +87,9 @@ export function BuilderToolbar() {
         case 'p':
           setActiveTool('place');
           break;
+        case 'a':
+          if (!e.ctrlKey && !e.metaKey) toggleViewAllFloors();
+          break;
         case 'g':
           toggleGridSnap();
           break;
@@ -119,7 +123,7 @@ export function BuilderToolbar() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeTool, setActiveTool, undo, redo, selectedPlacementIds, rotatePlacement, copyPlacements, pastePlacements, removePlacement, selectPlacement, showToast, toggleGridSnap]);
+  }, [activeTool, setActiveTool, undo, redo, selectedPlacementIds, rotatePlacement, copyPlacements, pastePlacements, removePlacement, selectPlacement, showToast, toggleGridSnap, toggleViewAllFloors]);
 
   return (
     <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 shadow-sm">

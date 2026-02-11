@@ -125,7 +125,7 @@ export function PlacedModule({ placement, module, isSelected, isCurrentFloor }: 
     const dragId = state.draggingPlacementId;
     const drg = dragId === placement.id
       || (!!dragId && sel && state.selectedPlacementIds.includes(dragId));
-    const curFloor = placement.floor === state.currentFloor;
+    const curFloor = state.viewAllFloors || placement.floor === state.currentFloor;
 
     const mat = mesh.material as THREE.MeshStandardMaterial;
 

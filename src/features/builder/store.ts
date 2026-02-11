@@ -30,6 +30,7 @@ interface BuilderStore {
   gridOffset: { x: number; z: number };
   terrainBaseY: number;
   showSurrounding: boolean;
+  viewAllFloors: boolean;
   gridSnap: boolean;
   gridLocked: boolean;
   toastMessage: string | null;
@@ -67,6 +68,7 @@ interface BuilderStore {
   setGridOffset: (offset: { x: number; z: number }) => void;
   setFloorAreas: (areas: FloorAreaInfo[]) => void;
   setTerrainBaseY: (y: number) => void;
+  toggleViewAllFloors: () => void;
   toggleSurrounding: () => void;
   toggleGridSnap: () => void;
   toggleGridLock: () => void;
@@ -105,6 +107,7 @@ export const useBuilderStore = create<BuilderStore>((set) => ({
   gridOffset: { x: 0, z: 0 },
   terrainBaseY: 0,
   showSurrounding: true,
+  viewAllFloors: false,
   gridSnap: true,
   gridLocked: true,
   toastMessage: null,
@@ -157,7 +160,7 @@ export const useBuilderStore = create<BuilderStore>((set) => ({
       return { selectedPlacementIds: [id], selectedModuleDefId: null, activeTool: 'select' };
     }),
 
-  setCurrentFloor: (floor) => set({ currentFloor: floor }),
+  setCurrentFloor: (floor) => set({ currentFloor: floor, viewAllFloors: false }),
 
   toggleFloorVisibility: (floor) =>
     set((state) => {
@@ -254,6 +257,7 @@ export const useBuilderStore = create<BuilderStore>((set) => ({
   setGridOffset: (offset) => set({ gridOffset: offset }),
   setFloorAreas: (areas) => set({ floorAreas: areas }),
   setTerrainBaseY: (y) => set({ terrainBaseY: y }),
+  toggleViewAllFloors: () => set((state) => ({ viewAllFloors: !state.viewAllFloors })),
   toggleSurrounding: () => set((state) => ({ showSurrounding: !state.showSurrounding })),
   toggleGridSnap: () => set((state) => ({ gridSnap: !state.gridSnap })),
   toggleGridLock: () => set((state) => ({ gridLocked: !state.gridLocked })),

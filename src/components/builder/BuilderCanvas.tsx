@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import * as THREE from 'three';
 import { useBuilderStore, type FloorAreaInfo } from '@/features/builder/store';
@@ -182,6 +182,7 @@ function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showS
   const visibleFloors = useBuilderStore((s) => s.visibleFloors);
   const selectedPlacementIds = useBuilderStore((s) => s.selectedPlacementIds);
   const gridOffset = useBuilderStore((s) => s.gridOffset);
+  const viewAllFloors = useBuilderStore((s) => s.viewAllFloors);
   const gridSnap = useBuilderStore((s) => s.gridSnap);
   const terrainBaseY = useBuilderStore((s) => s.terrainBaseY);
   const setTerrainBaseY = useBuilderStore((s) => s.setTerrainBaseY);
@@ -311,6 +312,37 @@ function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showS
   useEffect(() => {
     setFloorAreas(floorAreas);
   }, [floorAreas, setFloorAreas]);
+
+  // Initial camera: position above parcel center looking down
+  const { camera } = useThree();
+  const controlsRef = useRef<any>(null);
+  const initialCameraSetRef = useRef(false);
+
+  useEffect(() => {
+    if (!parcelBounds || initialCameraSetRef.current) return;
+    const ctrl = controlsRef.current;
+    if (!ctrl) return;
+
+    // Parcel center in world coords (Z-mirrored by parent group)
+    const cx = (parcelBounds.minX + parcelBounds.maxX) / 2;
+    const cz = (parcelBounds.minZ + parcelBounds.maxZ) / 2;
+    const worldX = cx;
+    const worldZ = -cz;
+
+    // Distance to fit parcel in view
+    const extentX = parcelBounds.maxX - parcelBounds.minX;
+    const extentZ = parcelBounds.maxZ - parcelBounds.minZ;
+    const maxExtent = Math.max(extentX, extentZ, 20);
+    const fovRad = ((camera as THREE.PerspectiveCamera).fov * Math.PI) / 180;
+    const dist = (maxExtent * 2.0) / (2 * Math.tan(fovRad / 2));
+
+    // Top-down with slight south angle for 3D perspective
+    camera.position.set(worldX, dist, worldZ + dist * 0.15);
+    ctrl.target.set(worldX, 0, worldZ);
+    ctrl.update();
+
+    initialCameraSetRef.current = true;
+  }, [parcelBounds, camera]);
 
   const hasTerrain = !!(parcelPolygon && parcelInfo);
   const [elevationGrid, setElevationGrid] = useState<TerrainElevationGrid | null>(null);
@@ -444,6 +476,7 @@ function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showS
     <>
       {/* Camera controls — outside mirror group */}
       <OrbitControls
+        ref={controlsRef}
         makeDefault
         minPolarAngle={0.05}
         maxPolarAngle={Math.PI - 0.05}
@@ -541,7 +574,7 @@ function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showS
                   placement={placement}
                   module={mod}
                   isSelected={selectedPlacementIds.includes(placement.id)}
-                  isCurrentFloor={placement.floor === currentFloor}
+                  isCurrentFloor={viewAllFloors || placement.floor === currentFloor}
                 />
               );
             })}
