@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, GizmoHelper, GizmoViewcube } from '@react-three/drei';
+import { OrbitControls, GizmoHelper, useGizmoContext } from '@react-three/drei';
 import * as THREE from 'three';
 import { useBuilderStore, type FloorAreaInfo } from '@/features/builder/store';
 import { getModuleById } from '@/lib/constants/modules';
@@ -141,6 +141,82 @@ function computeParcelOffset(
   return { x: fineDx, z: fineDz };
 }
 
+// ─── Direction Cube (동서남북 방위 큐브) ─────────────────────
+const DIRECTION_FACES: Array<{
+  label: string;
+  position: [number, number, number];
+  rotation: [number, number, number];
+  direction: [number, number, number];
+  isNorth?: boolean;
+}> = [
+  { label: '동', position: [0.501, 0, 0], rotation: [0, Math.PI / 2, 0], direction: [1, 0, 0] },
+  { label: '서', position: [-0.501, 0, 0], rotation: [0, -Math.PI / 2, 0], direction: [-1, 0, 0] },
+  { label: '위', position: [0, 0.501, 0], rotation: [-Math.PI / 2, 0, 0], direction: [0, 1, 0] },
+  { label: '아래', position: [0, -0.501, 0], rotation: [Math.PI / 2, 0, 0], direction: [0, -1, 0] },
+  { label: '남', position: [0, 0, 0.501], rotation: [0, 0, 0], direction: [0, 0, 1] },
+  { label: '북', position: [0, 0, -0.501], rotation: [0, Math.PI, 0], direction: [0, 0, -1], isNorth: true },
+];
+
+function createFaceCanvas(text: string, isNorth: boolean): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d')!;
+
+  if (isNorth) {
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.3)';
+    ctx.fillRect(0, 0, 128, 128);
+  }
+
+  ctx.fillStyle = '#1e293b';
+  ctx.font = 'bold 48px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 64, 68);
+
+  return canvas;
+}
+
+function DirectionCube() {
+  const { tweenCamera } = useGizmoContext();
+  const [hovered, setHovered] = useState<number | null>(null);
+
+  const textures = useMemo(
+    () => DIRECTION_FACES.map((f) => new THREE.CanvasTexture(createFaceCanvas(f.label, !!f.isNorth))),
+    [],
+  );
+
+  const edgesGeom = useMemo(() => new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)), []);
+
+  return (
+    <group scale={60}>
+      <lineSegments geometry={edgesGeom}>
+        <lineBasicMaterial color="#94a3b8" />
+      </lineSegments>
+
+      {DIRECTION_FACES.map((face, i) => (
+        <mesh
+          key={face.label}
+          position={face.position}
+          rotation={face.rotation}
+          onClick={() => tweenCamera(new THREE.Vector3(...face.direction))}
+          onPointerOver={() => setHovered(i)}
+          onPointerOut={() => setHovered(null)}
+        >
+          <planeGeometry args={[0.98, 0.98]} />
+          <meshBasicMaterial
+            map={textures[i]}
+            transparent
+            opacity={hovered === i ? 0.9 : face.isNorth ? 0.85 : 0.7}
+            side={THREE.DoubleSide}
+            depthTest={false}
+          />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 const GIZMO_MARGIN_CLOSED = 80;
 const GIZMO_MARGIN_OPEN = 368; // w-72 (288px) + 80px base
 
@@ -161,14 +237,7 @@ function AnimatedGizmo({ rightSidebarOpen }: { rightSidebarOpen: boolean }) {
 
   return (
     <GizmoHelper alignment="top-right" margin={[marginX, 80]}>
-      <GizmoViewcube
-        faces={['동', '서', '위', '아래', '남', '북']}
-        color="#f1f5f9"
-        textColor="#334155"
-        strokeColor="#94a3b8"
-        hoverColor="#dbeafe"
-        opacity={0.9}
-      />
+      <DirectionCube />
     </GizmoHelper>
   );
 }
