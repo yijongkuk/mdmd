@@ -397,50 +397,60 @@ export const AuctionOverlay = memo(function AuctionOverlay({
   propertiesRef.current = properties;
 
   // ─── AUTO-POLYGON: refresh on map move (pan + zoom) via idle event ───
+  const idleRegisteredRef = useRef(false);
+
+  const refreshPolygons = useCallback(() => {
+    const map = getKakaoMapInstance();
+    if (!map || !window.kakao?.maps) return;
+
+    // Clear existing auto-polygons
+    polygonsRef.current.forEach((p) => p.setMap(null));
+    polygonsRef.current = [];
+
+    const currentZoom = map.getLevel();
+    if (getDisplayMode(currentZoom) !== 'marker' || currentZoom > 5) return;
+
+    const gen = ++polyGenRef.current;
+    const { kakao } = window;
+
+    // Filter to properties in current viewport
+    const bounds = map.getBounds();
+    const sw = bounds.getSouthWest();
+    const ne = bounds.getNorthEast();
+    const inView = propertiesRef.current.filter((p) =>
+      p.lat != null && p.lng != null &&
+      p.lat! >= sw.getLat() && p.lat! <= ne.getLat() &&
+      p.lng! >= sw.getLng() && p.lng! <= ne.getLng()
+    );
+    const maxPolygons = currentZoom <= 3 ? 40 : 30;
+    fetchConcurrent(
+      inView.slice(0, maxPolygons),
+      async (p) => {
+        if (polyGenRef.current !== gen) return;
+        const drawn = await drawPolygon(p, map, kakao);
+        if (polyGenRef.current === gen) {
+          polygonsRef.current.push(...drawn);
+        } else {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          drawn.forEach((d: any) => d.setMap(null));
+        }
+      },
+      4,
+    );
+  }, [drawPolygon]);
+
+  // Register idle listener once when map is ready, re-trigger on zoom changes
   useEffect(() => {
     const map = getKakaoMapInstance();
     if (!map || !window.kakao?.maps) return;
-    const { kakao } = window;
 
-    const refreshPolygons = () => {
-      // Clear existing auto-polygons
-      polygonsRef.current.forEach((p) => p.setMap(null));
-      polygonsRef.current = [];
+    // Register idle listener once (persists for component lifetime)
+    if (!idleRegisteredRef.current) {
+      window.kakao.maps.event.addListener(map, 'idle', refreshPolygons);
+      idleRegisteredRef.current = true;
+    }
 
-      const currentZoom = map.getLevel();
-      if (getDisplayMode(currentZoom) !== 'marker') return;
-      if (currentZoom > 5) return;
-
-      const gen = ++polyGenRef.current;
-
-      // Filter to properties in current viewport
-      const bounds = map.getBounds();
-      const sw = bounds.getSouthWest();
-      const ne = bounds.getNorthEast();
-      const inView = propertiesRef.current.filter((p) =>
-        p.lat != null && p.lng != null &&
-        p.lat! >= sw.getLat() && p.lat! <= ne.getLat() &&
-        p.lng! >= sw.getLng() && p.lng! <= ne.getLng()
-      );
-      const maxPolygons = currentZoom <= 3 ? 40 : 30;
-      fetchConcurrent(
-        inView.slice(0, maxPolygons),
-        async (p) => {
-          if (polyGenRef.current !== gen) return;
-          const drawn = await drawPolygon(p, map, kakao);
-          if (polyGenRef.current === gen) {
-            polygonsRef.current.push(...drawn);
-          } else {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            drawn.forEach((d: any) => d.setMap(null));
-          }
-        },
-        4,
-      );
-    };
-
-    kakao.maps.event.addListener(map, 'idle', refreshPolygons);
-    // Initial draw
+    // Draw for current view
     refreshPolygons();
 
     return () => {
@@ -448,7 +458,7 @@ export const AuctionOverlay = memo(function AuctionOverlay({
       polygonsRef.current.forEach((p) => p.setMap(null));
       polygonsRef.current = [];
     };
-  }, [drawPolygon]);
+  }, [refreshPolygons, zoomLevel]);
 
   // ─── MARKER HTML UPDATE: runs when properties or selectedId changes ───
   useEffect(() => {
