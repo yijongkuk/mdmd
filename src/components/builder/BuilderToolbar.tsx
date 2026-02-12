@@ -8,6 +8,7 @@ import {
   Redo2,
   Building2,
   Grid3x3,
+  Satellite,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
@@ -36,6 +37,8 @@ export function BuilderToolbar() {
   const rotatePlacement = useBuilderStore((s) => s.rotatePlacement);
   const showSurrounding = useBuilderStore((s) => s.showSurrounding);
   const toggleSurrounding = useBuilderStore((s) => s.toggleSurrounding);
+  const showSatellite = useBuilderStore((s) => s.showSatellite);
+  const toggleSatellite = useBuilderStore((s) => s.toggleSatellite);
   const gridSnap = useBuilderStore((s) => s.gridSnap);
   const toggleGridSnap = useBuilderStore((s) => s.toggleGridSnap);
   const copyPlacements = useBuilderStore((s) => s.copyPlacements);
@@ -196,6 +199,22 @@ export function BuilderToolbar() {
         </TooltipTrigger>
         <TooltipContent side="bottom">
           주변 건물 {showSurrounding ? '숨기기' : '보기'}
+        </TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant={showSatellite ? 'default' : 'ghost'}
+            size="icon"
+            className="h-8 w-8"
+            onClick={toggleSatellite}
+          >
+            <Satellite className="h-4 w-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          위성사진 {showSatellite ? '숨기기' : '보기'}
         </TooltipContent>
       </Tooltip>
 

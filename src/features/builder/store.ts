@@ -30,6 +30,7 @@ interface BuilderStore {
   gridOffset: { x: number; z: number };
   terrainBaseY: number;
   showSurrounding: boolean;
+  showSatellite: boolean;
   viewAllFloors: boolean;
   gridSnap: boolean;
   gridLocked: boolean;
@@ -70,6 +71,7 @@ interface BuilderStore {
   setTerrainBaseY: (y: number) => void;
   toggleViewAllFloors: () => void;
   toggleSurrounding: () => void;
+  toggleSatellite: () => void;
   toggleGridSnap: () => void;
   toggleGridLock: () => void;
   showToast: (message: string, type?: 'info' | 'error') => void;
@@ -107,6 +109,7 @@ export const useBuilderStore = create<BuilderStore>((set) => ({
   gridOffset: { x: 0, z: 0 },
   terrainBaseY: 0,
   showSurrounding: true,
+  showSatellite: false,
   viewAllFloors: false,
   gridSnap: true,
   gridLocked: true,
@@ -259,6 +262,7 @@ export const useBuilderStore = create<BuilderStore>((set) => ({
   setTerrainBaseY: (y) => set({ terrainBaseY: y }),
   toggleViewAllFloors: () => set((state) => ({ viewAllFloors: !state.viewAllFloors })),
   toggleSurrounding: () => set((state) => ({ showSurrounding: !state.showSurrounding })),
+  toggleSatellite: () => set((state) => ({ showSatellite: !state.showSatellite })),
   toggleGridSnap: () => set((state) => ({ gridSnap: !state.gridSnap })),
   toggleGridLock: () => set((state) => ({ gridLocked: !state.gridLocked })),
   showToast: (message, type = 'error') => {
