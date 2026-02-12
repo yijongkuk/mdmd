@@ -241,7 +241,6 @@ export default function BuilderPage() {
   useSpeckleSync();
 
   const showSurrounding = useBuilderStore((s) => s.showSurrounding);
-  const showSatellite = useBuilderStore((s) => s.showSatellite);
 
   // Boundary dimensions from regulation
   const boundaryWidth = regulation
@@ -325,7 +324,6 @@ export default function BuilderPage() {
           boundaryHeight={boundaryHeight}
           parcelInfo={parcelInfo}
           showSurrounding={showSurrounding}
-          showSatellite={showSatellite}
           rightSidebarOpen={rightSidebarOpen}
         />
 
