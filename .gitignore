@@ -44,4 +44,15 @@ next-env.d.ts
 prisma/dev.db
 prisma/dev.db-journal
 generated/prisma
+
+# dev artifacts
+dev.db
+dev.db-journal
 nul
+screenshot/
+*.test.json
+test_*.json
+auction_test.json
+
+.vercel
+.env*.local

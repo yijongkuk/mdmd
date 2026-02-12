@@ -4,7 +4,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
 // ── MVP에서 사용하지 않는 enum/모델은 주석 처리 ──────────────────
