@@ -271,7 +271,7 @@ function MapPageInner() {
 
       {/* Loading / count indicator (초기 로딩 후 상태 표시) */}
       {!showInitialOverlay && (
-        <div className="absolute left-1/2 top-16 z-20 -translate-x-1/2">
+        <div className="absolute left-1/2 top-4 z-20 -translate-x-1/2">
           {auctionProperties.length > 0 ? (
             <div className="flex items-center gap-2 rounded-full bg-white/90 px-3 py-1 shadow-sm">
               {loadingRegion && (
