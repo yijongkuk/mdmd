@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { AuctionProperty } from '@/types/auction';
 import type { MapBounds } from '@/types/land';
 import { fetchAuctionProperties } from './services';
+import { useAuctionStore } from './store';
 
 /**
  * 지도 중심 우선 로딩 + 진행률 표시:
@@ -11,6 +12,8 @@ import { fetchAuctionProperties } from './services';
  * 2a) PNU → V-World 필지 경계 조회 → 폴리곤 중심점 = 핀 위치 (가장 정확)
  * 2b) PNU 없거나 실패 → Kakao 클라이언트 지오코딩 fallback
  * 3) 모든 로딩 완료 시 오버레이 해제
+ *
+ * Zustand 글로벌 스토어로 데이터 유지 — 페이지 이동 후에도 재수집 안 함
  */
 
 const REGION_PAGES: { region: string; maxPages: number }[] = [
@@ -169,38 +172,14 @@ export function useAuctionProperties(
   enabled: boolean,
   zoomLevel?: number,
 ) {
-  const cacheRef = useRef<Map<string, AuctionProperty>>(new Map());
-  const [version, setVersion] = useState(0);
-  const [isLoading, setIsLoading] = useState(false);
-  const [loadingRegion, setLoadingRegion] = useState('');
-  const [progress, setProgress] = useState<LoadingProgress | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const initialFetchDone = useRef(false);
-
-  const mergeResults = useCallback((properties: AuctionProperty[]) => {
-    let changed = 0;
-    for (const p of properties) {
-      if (!p.id) continue;
-      if (!cacheRef.current.has(p.id)) {
-        cacheRef.current.set(p.id, p);
-        changed++;
-      } else {
-        const existing = cacheRef.current.get(p.id)!;
-        if (!existing.lat && p.lat) {
-          cacheRef.current.set(p.id, p);
-          changed++;
-        }
-      }
-    }
-    if (changed > 0) {
-      setVersion((v) => v + 1);
-    }
-  }, []);
+  const store = useAuctionStore();
+  const fetchingRef = useRef(false);
 
   useEffect(() => {
-    if (!enabled || initialFetchDone.current) return;
-    initialFetchDone.current = true;
-    setIsLoading(true);
+    if (!enabled || store.initialFetchDone || fetchingRef.current) return;
+    fetchingRef.current = true;
+    store.setInitialFetchDone(true);
+    store.setIsLoading(true);
 
     // 지도 중심 좌표 기준 지역 정렬
     const centerLat = bounds ? (bounds.sw.lat + bounds.ne.lat) / 2 : 37.5385;
@@ -217,7 +196,7 @@ export function useAuctionProperties(
         if (listRes.ok) {
           const listData = await listRes.json();
           if (Array.isArray(listData.properties)) {
-            mergeResults(listData.properties);
+            store.mergeResults(listData.properties);
           }
         }
         // 2) 지오코딩 (서버 캐시 히트 시 즉시, 미히트 시 수분 소요)
@@ -225,7 +204,7 @@ export function useAuctionProperties(
         if (geoRes.ok) {
           const geoData = await geoRes.json();
           if (Array.isArray(geoData.properties)) {
-            mergeResults(geoData.properties);
+            store.mergeResults(geoData.properties);
           }
         }
       } catch { /* 폐교 데이터 실패 시 무시 — OnBid 로딩에 영향 없음 */ }
@@ -238,7 +217,7 @@ export function useAuctionProperties(
 
         // ── Phase 1: skipGeocode 병렬 10개 → 목록 수집 ──
         let phase1Done = 0;
-        setProgress({ phase: '매물 목록 수집 중', completed: 0, total: totalJobs, propertyCount: 0 });
+        store.setProgress({ phase: '매물 목록 수집 중', completed: 0, total: totalJobs, propertyCount: 0 });
 
         const phase1Tasks = allJobs.map(({ region, page }) => () =>
           fetchAuctionProperties(null, {
@@ -249,19 +228,19 @@ export function useAuctionProperties(
 
         await runWithConcurrency(phase1Tasks, 10, (r) => {
           const tagged = r.properties.map((p) => ({ ...p, source: 'onbid' as const }));
-          mergeResults(tagged);
+          store.mergeResults(tagged);
           phase1Done++;
-          setProgress({
+          store.setProgress({
             phase: '매물 목록 수집 중',
             completed: phase1Done,
             total: totalJobs,
-            propertyCount: cacheRef.current.size,
+            propertyCount: store.cache.size,
           });
         });
 
         // ── Phase 2: 필지 경계 → 중심점 방식 (PNU 우선, Kakao fallback) ──
         const toGeocode: { id: string; address: string; pnu?: string }[] = [];
-        for (const [id, p] of cacheRef.current) {
+        for (const [id, p] of store.cache) {
           if (p.lat == null && p.address && p.source !== 'closed_school') {
             toGeocode.push({ id, address: p.address, pnu: p.pnu });
           }
@@ -277,11 +256,11 @@ export function useAuctionProperties(
           ];
 
           if (uniquePnuItems.length > 0) {
-            setProgress({
+            store.setProgress({
               phase: '필지 경계 조회 중',
               completed: 0,
               total: uniquePnuItems.length,
-              propertyCount: cacheRef.current.size,
+              propertyCount: store.cache.size,
             });
 
             // geocode-batch 서버 → PNU 기반 V-World 필지 조회 → centroid 반환
@@ -301,11 +280,11 @@ export function useAuctionProperties(
                 }
               } catch { /* skip failed batch */ }
               batchDone += chunk.length;
-              setProgress({
+              store.setProgress({
                 phase: '필지 경계 조회 중',
                 completed: batchDone,
                 total: uniquePnuItems.length,
-                propertyCount: cacheRef.current.size,
+                propertyCount: store.cache.size,
               });
             }
           }
@@ -317,11 +296,11 @@ export function useAuctionProperties(
           const kakaoPnuMap: Record<string, string> = {};
 
           if (uniqueKakaoAddresses.length > 0) {
-            setProgress({
+            store.setProgress({
               phase: '지도 마커 생성 중',
               completed: 0,
               total: uniqueKakaoAddresses.length,
-              propertyCount: cacheRef.current.size,
+              propertyCount: store.cache.size,
             });
 
             const kakaoReady = await waitForKakaoServices();
@@ -337,11 +316,11 @@ export function useAuctionProperties(
                 }
                 done++;
                 if (done % 10 === 0 || done === uniqueKakaoAddresses.length) {
-                  setProgress({
+                  store.setProgress({
                     phase: '지도 마커 생성 중',
                     completed: done,
                     total: uniqueKakaoAddresses.length,
-                    propertyCount: cacheRef.current.size,
+                    propertyCount: store.cache.size,
                   });
                 }
                 return result;
@@ -356,11 +335,11 @@ export function useAuctionProperties(
           if (kakaoPnuEntries.length > 0) {
             const kakaoPnuItems = kakaoPnuEntries.map(([address, pnu]) => ({ address, pnu }));
 
-            setProgress({
+            store.setProgress({
               phase: 'Kakao PNU 필지 조회 중',
               completed: 0,
               total: kakaoPnuItems.length,
-              propertyCount: cacheRef.current.size,
+              propertyCount: store.cache.size,
             });
 
             const batchSize = 50;
@@ -384,57 +363,66 @@ export function useAuctionProperties(
                 }
               } catch { /* skip failed batch */ }
               batchDone += chunk.length;
-              setProgress({
+              store.setProgress({
                 phase: 'Kakao PNU 필지 조회 중',
                 completed: batchDone,
                 total: kakaoPnuItems.length,
-                propertyCount: cacheRef.current.size,
+                propertyCount: store.cache.size,
               });
             }
           }
 
           // 결과 적용 — PNU도 함께 저장
+          const { cache } = store;
           let changed = 0;
           for (const { id, address } of toGeocode) {
             const coords = geocodeResults[address];
             if (coords) {
-              const existing = cacheRef.current.get(id);
+              const existing = cache.get(id);
               if (existing && !existing.lat) {
                 const pnu = existing.pnu || kakaoPnuMap[address];
-                cacheRef.current.set(id, { ...existing, lat: coords.lat, lng: coords.lng, ...(pnu ? { pnu } : {}) });
+                cache.set(id, { ...existing, lat: coords.lat, lng: coords.lng, ...(pnu ? { pnu } : {}) });
                 changed++;
               }
             }
           }
           if (changed > 0) {
-            setVersion((v) => v + 1);
+            useAuctionStore.setState({ version: useAuctionStore.getState().version + 1 });
           }
         }
 
         // OnBid 완료 후에도 폐교 geocode가 아직 진행중일 수 있음 — 기다리지 않음
         void closedSchoolPromise;
       } finally {
-        setIsLoading(false);
-        setLoadingRegion('');
-        setProgress(null);
+        store.setIsLoading(false);
+        store.setLoadingRegion('');
+        store.setProgress(null);
+        fetchingRef.current = false;
       }
     })();
-  }, [enabled, mergeResults]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled]);
 
   useEffect(() => {
     if (!enabled) {
-      cacheRef.current.clear();
-      initialFetchDone.current = false;
-      setVersion((v) => v + 1);
+      store.clearCache();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled]);
 
   const properties = useMemo(() => {
-    return Array.from(cacheRef.current.values());
+    return Array.from(store.cache.values());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [version]);
+  }, [store.version]);
 
   const totalCount = properties.length;
 
-  return { properties, totalCount, isLoading, loadingRegion, progress, error };
+  return {
+    properties,
+    totalCount,
+    isLoading: store.isLoading,
+    loadingRegion: store.loadingRegion,
+    progress: store.progress,
+    error: null as string | null,
+  };
 }
