@@ -176,10 +176,12 @@ export function useAuctionProperties(
   const fetchingRef = useRef(false);
 
   useEffect(() => {
-    if (!enabled || store.initialFetchDone || fetchingRef.current) return;
+    // 항상 최신 store 상태를 읽어야 페이지 재진입 시 중복 fetch 방지
+    const currentState = useAuctionStore.getState();
+    if (!enabled || currentState.initialFetchDone || fetchingRef.current) return;
     fetchingRef.current = true;
-    store.setInitialFetchDone(true);
-    store.setIsLoading(true);
+    currentState.setInitialFetchDone(true);
+    currentState.setIsLoading(true);
 
     // 지도 중심 좌표 기준 지역 정렬
     const centerLat = bounds ? (bounds.sw.lat + bounds.ne.lat) / 2 : 37.5385;
@@ -400,13 +402,6 @@ export function useAuctionProperties(
         fetchingRef.current = false;
       }
     })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled]);
-
-  useEffect(() => {
-    if (!enabled) {
-      store.clearCache();
-    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled]);
 
