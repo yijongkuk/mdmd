@@ -75,29 +75,38 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
     try {
       const { cache } = get();
       const data = Array.from(cache.entries());
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        timestamp: Date.now(),
-        data,
-      }));
-    } catch { /* quota exceeded 등 무시 */ }
+      const json = JSON.stringify({ timestamp: Date.now(), data });
+      const sizeMB = (json.length / 1024 / 1024).toFixed(2);
+      localStorage.setItem(STORAGE_KEY, json);
+      console.log(`[auction] localStorage 저장 완료: ${cache.size}건, ${sizeMB}MB`);
+    } catch (e) {
+      console.warn('[auction] localStorage 저장 실패:', e);
+    }
   },
 
   hydrateFromStorage: () => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return false;
+      if (!raw) {
+        console.log('[auction] localStorage 캐시 없음 — API에서 수집');
+        return false;
+      }
       const { timestamp, data } = JSON.parse(raw) as {
         timestamp: number;
         data: [string, AuctionProperty][];
       };
+      const ageMin = Math.round((Date.now() - timestamp) / 60000);
       if (Date.now() - timestamp > STORAGE_TTL) {
+        console.log(`[auction] localStorage 캐시 만료 (${ageMin}분 전) — 재수집`);
         localStorage.removeItem(STORAGE_KEY);
         return false;
       }
       const cache = new Map(data);
       set({ cache, version: get().version + 1, initialFetchDone: true });
+      console.log(`[auction] localStorage 복원 완료: ${cache.size}건, ${ageMin}분 전 저장`);
       return true;
-    } catch {
+    } catch (e) {
+      console.warn('[auction] localStorage 복원 실패:', e);
       localStorage.removeItem(STORAGE_KEY);
       return false;
     }
