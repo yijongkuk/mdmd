@@ -36,6 +36,7 @@ export interface AuctionListResponse {
   totalCount: number;
   page: number;
   pageSize: number;
+  apiError?: string;
 }
 
 export interface AuctionFilters {

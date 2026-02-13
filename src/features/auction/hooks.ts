@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { AuctionProperty } from '@/types/auction';
 import type { MapBounds } from '@/types/land';
 import { fetchAuctionProperties } from './services';
@@ -221,6 +221,7 @@ export function useAuctionProperties(
         let phase1Done = 0;
         store.setProgress({ phase: '매물 목록 수집 중', completed: 0, total: totalJobs, propertyCount: 0 });
 
+        let firstApiError: string | null = null;
         const phase1Tasks = allJobs.map(({ region, page }) => () =>
           fetchAuctionProperties(null, {
             page, size: 1000, source: 'kamco', category: 'land',
@@ -229,11 +230,16 @@ export function useAuctionProperties(
         );
 
         await runWithConcurrency(phase1Tasks, 10, (r) => {
+          // API 에러 감지 (OnBid 한도 초과, 키 오류 등)
+          if ('apiError' in r && (r as { apiError?: string }).apiError && !firstApiError) {
+            firstApiError = (r as { apiError?: string }).apiError!;
+            store.setApiError(firstApiError);
+          }
           const tagged = r.properties.map((p) => ({ ...p, source: 'onbid' as const }));
           store.mergeResults(tagged);
           phase1Done++;
           store.setProgress({
-            phase: '매물 목록 수집 중',
+            phase: firstApiError ? `API 오류: ${firstApiError}` : '매물 목록 수집 중',
             completed: phase1Done,
             total: totalJobs,
             propertyCount: store.cache.size,
@@ -412,12 +418,21 @@ export function useAuctionProperties(
 
   const totalCount = properties.length;
 
+  const retry = useCallback(() => {
+    const s = useAuctionStore.getState();
+    s.clearCache();
+    s.setApiError(null);
+    fetchingRef.current = false;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return {
     properties,
     totalCount,
     isLoading: store.isLoading,
     loadingRegion: store.loadingRegion,
     progress: store.progress,
-    error: null as string | null,
+    apiError: store.apiError,
+    retry,
   };
 }

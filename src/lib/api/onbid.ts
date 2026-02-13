@@ -99,9 +99,27 @@ function normalizeItems(body: { items?: { item?: OnbidItem | OnbidItem[] } }): O
   return Array.isArray(raw) ? raw : [raw];
 }
 
+/** OnBid XML 에러 응답 감지 — 공공 API는 HTTP 200이지만 body에 에러 포함 */
+function checkXmlError(parsed: Record<string, unknown>): string | null {
+  const svcResp = parsed?.OpenAPI_ServiceResponse as Record<string, unknown> | undefined;
+  if (svcResp?.cmmMsgHeader) {
+    const hdr = svcResp.cmmMsgHeader as Record<string, unknown>;
+    return String(hdr.returnAuthMsg ?? hdr.errMsg ?? 'UNKNOWN_API_ERROR');
+  }
+  const header = (parsed?.response as Record<string, unknown>)?.header as Record<string, unknown> | undefined;
+  if (header) {
+    const code = String(header.resultCode ?? '');
+    // XML 파서가 '00'을 숫자 0으로 변환할 수 있음 → '0'도 정상
+    if (code && code !== '00' && code !== '0') {
+      return String(header.resultMsg ?? `ERROR_CODE_${code}`);
+    }
+  }
+  return null;
+}
+
 export async function getKamcoAuctionList(
   params: AuctionSearchParams,
-): Promise<{ properties: AuctionProperty[]; totalCount: number }> {
+): Promise<{ properties: AuctionProperty[]; totalCount: number; apiError?: string }> {
   const page = params.page ?? 1;
   const size = params.size ?? 20;
   const regionKey = params.regionKeyword ?? '';
@@ -122,11 +140,29 @@ export async function getKamcoAuctionList(
       query.set('CLTR_NM', params.regionKeyword);
     }
 
-    const res = await fetch(`${BASE_URL}/getKamcoPbctCltrList?${query.toString()}`);
-    if (!res.ok) return { properties: [], totalCount: 0 };
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60_000);
+    const res = await fetch(`${BASE_URL}/getKamcoPbctCltrList?${query.toString()}`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      const errMsg = `OnBid HTTP ${res.status} ${res.statusText} (region=${regionKey}, page=${page})`;
+      console.error(errMsg);
+      return { properties: [], totalCount: 0, apiError: errMsg };
+    }
 
     const xml = await res.text();
     const parsed = parser.parse(xml);
+
+    // 공공 API XML 에러 응답 감지
+    const xmlError = checkXmlError(parsed);
+    if (xmlError) {
+      console.error(`OnBid API error: ${xmlError} (region=${regionKey}, page=${page})`);
+      return { properties: [], totalCount: 0, apiError: xmlError };
+    }
+
     const body = parsed?.response?.body;
     const items = normalizeItems(body);
     const totalCount = Number(body?.totalCount) || 0;
@@ -139,8 +175,9 @@ export async function getKamcoAuctionList(
     setCache(cacheKey, result, TTL.AUCTION);
     return result;
   } catch (err) {
-    console.error('OnBid getKamcoAuctionList error:', err);
-    return { properties: [], totalCount: 0 };
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error(`OnBid getKamcoAuctionList error: ${errMsg} (region=${regionKey}, page=${page})`);
+    return { properties: [], totalCount: 0, apiError: errMsg };
   }
 }
 

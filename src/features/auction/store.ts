@@ -13,6 +13,8 @@ interface AuctionState {
   isLoading: boolean;
   loadingRegion: string;
   progress: LoadingProgress | null;
+  /** API 에러 메시지 (OnBid 한도 초과 등) */
+  apiError: string | null;
 
   /** 캐시에 매물 병합 (새 항목 또는 좌표 업데이트) */
   mergeResults: (properties: AuctionProperty[]) => void;
@@ -21,6 +23,7 @@ interface AuctionState {
   setLoadingRegion: (v: string) => void;
   setProgress: (v: LoadingProgress | null) => void;
   setInitialFetchDone: (v: boolean) => void;
+  setApiError: (v: string | null) => void;
   /** 캐시 초기화 */
   clearCache: () => void;
 }
@@ -32,6 +35,7 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
   isLoading: false,
   loadingRegion: '',
   progress: null,
+  apiError: null,
 
   mergeResults: (properties) => {
     const { cache } = get();
@@ -58,6 +62,7 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
   setLoadingRegion: (v) => set({ loadingRegion: v }),
   setProgress: (v) => set({ progress: v }),
   setInitialFetchDone: (v) => set({ initialFetchDone: v }),
+  setApiError: (v) => set({ apiError: v }),
   clearCache: () => {
     get().cache.clear();
     set({ version: get().version + 1, initialFetchDone: false });

@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { cn } from '@/lib/cn';
 import type { MapBounds } from '@/types/land';
 import type { AuctionProperty, AuctionFilters } from '@/types/auction';
-import { useAuctionProperties } from '@/features/auction';
+import { useAuctionProperties, useAuctionStore } from '@/features/auction';
 import { useBuilderStore } from '@/features/builder/store';
 import { KakaoMap, getKakaoMapInstance } from '@/components/map/KakaoMap';
 import { AuctionOverlay } from '@/components/map/AuctionOverlay';
@@ -72,7 +72,7 @@ function MapPageInner() {
   const [mapType, setMapType] = useState<MapType>('roadmap');
 
   // OnBid 매각/임대 물건 — 실제 공매·매각·임대 유휴지만 표시
-  const { properties: auctionProperties, isLoading: auctionsLoading, loadingRegion, progress } =
+  const { properties: auctionProperties, isLoading: auctionsLoading, loadingRegion, progress, apiError, retry } =
     useAuctionProperties(bounds, true, zoomLevel);
 
   // Client-side filtering (공통 필터 로직)
@@ -218,29 +218,71 @@ function MapPageInner() {
             : 'pointer-events-none opacity-0'
         )}
       >
-        <div className="flex flex-col items-center gap-5 w-72">
-          <div className="h-10 w-10 animate-spin rounded-full border-4 border-white/30 border-t-white" />
-          <p className="text-lg font-medium text-white">전국 매물 불러오는 중</p>
-
-          {progress && (
+        <div className="flex flex-col items-center gap-5 w-80">
+          {apiError ? (
             <>
-              {/* 프로그레스 바 */}
-              <div className="w-full rounded-full bg-white/20 h-2 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-white transition-all duration-300 ease-out"
-                  style={{ width: `${progressPercent}%` }}
-                />
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-500/20">
+                <svg className="h-6 w-6 text-red-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                </svg>
               </div>
-
-              {/* 상세 진행 정보 */}
-              <div className="flex flex-col items-center gap-1">
-                <p className="text-sm text-white/80">
-                  {progress.phase} ({progressPercent}%)
-                </p>
+              <p className="text-lg font-medium text-white">OnBid API 오류</p>
+              <p className="text-sm text-white/70 text-center leading-relaxed">
+                {apiError.includes('EXCEEDS') || apiError.includes('한도')
+                  ? 'API 일일 호출 한도를 초과했습니다. 자정 이후 재시도하거나, 폐교 데이터만 먼저 확인하세요.'
+                  : apiError.includes('NOT_REGISTERED') || apiError.includes('KEY')
+                    ? 'API 키가 유효하지 않습니다. .env.local의 ONBID_API_KEY를 확인하세요.'
+                    : `${apiError}`}
+              </p>
+              <div className="flex gap-3">
+                <button
+                  className="rounded-lg bg-white/20 px-4 py-2 text-sm font-medium text-white hover:bg-white/30 transition-colors"
+                  onClick={retry}
+                >
+                  재시도
+                </button>
+                <button
+                  className="rounded-lg bg-blue-500/80 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 transition-colors"
+                  onClick={() => {
+                    useAuctionStore.getState().setIsLoading(false);
+                    useAuctionStore.getState().setProgress(null);
+                  }}
+                >
+                  닫고 계속
+                </button>
+              </div>
+              {progress && progress.propertyCount > 0 && (
                 <p className="text-xs text-white/50">
-                  {progress.propertyCount.toLocaleString()}건 수집
+                  (폐교 등 {progress.propertyCount.toLocaleString()}건은 이미 로드됨)
                 </p>
-              </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="h-10 w-10 animate-spin rounded-full border-4 border-white/30 border-t-white" />
+              <p className="text-lg font-medium text-white">전국 매물 불러오는 중</p>
+
+              {progress && (
+                <>
+                  {/* 프로그레스 바 */}
+                  <div className="w-full rounded-full bg-white/20 h-2 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-white transition-all duration-300 ease-out"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+
+                  {/* 상세 진행 정보 */}
+                  <div className="flex flex-col items-center gap-1">
+                    <p className="text-sm text-white/80">
+                      {progress.phase} ({progressPercent}%)
+                    </p>
+                    <p className="text-xs text-white/50">
+                      {progress.propertyCount.toLocaleString()}건 수집
+                    </p>
+                  </div>
+                </>
+              )}
             </>
           )}
         </div>

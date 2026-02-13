@@ -92,7 +92,7 @@ export async function GET(request: NextRequest) {
   const regionKeyword = searchParams.get('regionKeyword') ?? ''; // CLTR_NM 서버 측 필터
 
   try {
-    const fetchPromises: Promise<{ properties: AuctionProperty[]; totalCount: number }>[] = [];
+    const fetchPromises: Promise<{ properties: AuctionProperty[]; totalCount: number; apiError?: string }>[] = [];
 
     const params = {
       page,
@@ -108,11 +108,15 @@ export async function GET(request: NextRequest) {
     const results = await Promise.allSettled(fetchPromises);
     let allProperties: AuctionProperty[] = [];
     let totalCount = 0;
+    let apiError: string | undefined;
 
     for (const r of results) {
       if (r.status === 'fulfilled') {
         allProperties = allProperties.concat(r.value.properties);
         totalCount += r.value.totalCount;
+        if (r.value.apiError) apiError = r.value.apiError;
+      } else {
+        apiError = r.reason?.message ?? 'Unknown fetch error';
       }
     }
 
@@ -188,6 +192,7 @@ export async function GET(request: NextRequest) {
       totalCount,
       page,
       pageSize: size,
+      ...(apiError ? { apiError } : {}),
     });
   } catch (e) {
     console.error('Auction API error:', e);
