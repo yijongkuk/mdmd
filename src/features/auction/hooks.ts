@@ -179,6 +179,13 @@ export function useAuctionProperties(
     // 항상 최신 store 상태를 읽어야 페이지 재진입 시 중복 fetch 방지
     const currentState = useAuctionStore.getState();
     if (!enabled || currentState.initialFetchDone || fetchingRef.current) return;
+
+    // localStorage에서 캐시 복원 시도 — 성공하면 API 호출 스킵
+    if (currentState.hydrateFromStorage()) {
+      fetchingRef.current = false;
+      return;
+    }
+
     fetchingRef.current = true;
     currentState.setInitialFetchDone(true);
     currentState.setIsLoading(true);
@@ -402,6 +409,8 @@ export function useAuctionProperties(
         // OnBid 완료 후에도 폐교 geocode가 아직 진행중일 수 있음 — 기다리지 않음
         void closedSchoolPromise;
       } finally {
+        // 수집 완료 — localStorage에 캐시 저장 (새로고침 시 즉시 복원)
+        store.persistToStorage();
         store.setIsLoading(false);
         store.setLoadingRegion('');
         store.setProgress(null);

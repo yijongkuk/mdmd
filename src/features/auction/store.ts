@@ -2,6 +2,9 @@ import { create } from 'zustand';
 import type { AuctionProperty } from '@/types/auction';
 import type { LoadingProgress } from './hooks';
 
+const STORAGE_KEY = 'auction-cache';
+const STORAGE_TTL = 4 * 60 * 60 * 1000; // 4시간
+
 interface AuctionState {
   /** 수집된 매물 캐시 (id → property) */
   cache: Map<string, AuctionProperty>;
@@ -24,6 +27,10 @@ interface AuctionState {
   setProgress: (v: LoadingProgress | null) => void;
   setInitialFetchDone: (v: boolean) => void;
   setApiError: (v: string | null) => void;
+  /** localStorage에 캐시 저장 */
+  persistToStorage: () => void;
+  /** localStorage에서 캐시 복원 — 성공 시 true */
+  hydrateFromStorage: () => boolean;
   /** 캐시 초기화 */
   clearCache: () => void;
 }
@@ -63,8 +70,42 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
   setProgress: (v) => set({ progress: v }),
   setInitialFetchDone: (v) => set({ initialFetchDone: v }),
   setApiError: (v) => set({ apiError: v }),
+
+  persistToStorage: () => {
+    try {
+      const { cache } = get();
+      const data = Array.from(cache.entries());
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        timestamp: Date.now(),
+        data,
+      }));
+    } catch { /* quota exceeded 등 무시 */ }
+  },
+
+  hydrateFromStorage: () => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return false;
+      const { timestamp, data } = JSON.parse(raw) as {
+        timestamp: number;
+        data: [string, AuctionProperty][];
+      };
+      if (Date.now() - timestamp > STORAGE_TTL) {
+        localStorage.removeItem(STORAGE_KEY);
+        return false;
+      }
+      const cache = new Map(data);
+      set({ cache, version: get().version + 1, initialFetchDone: true });
+      return true;
+    } catch {
+      localStorage.removeItem(STORAGE_KEY);
+      return false;
+    }
+  },
+
   clearCache: () => {
     get().cache.clear();
+    try { localStorage.removeItem(STORAGE_KEY); } catch { /* */ }
     set({ version: get().version + 1, initialFetchDone: false });
   },
 }));
