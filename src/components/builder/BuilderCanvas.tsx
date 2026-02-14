@@ -252,6 +252,7 @@ interface BuilderCanvasProps {
 }
 
 function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showSurrounding = true, showSatellite = false, rightSidebarOpen = true }: BuilderCanvasProps) {
+  const activeTool = useBuilderStore((s) => s.activeTool);
   const placements = useBuilderStore((s) => s.placements);
   const currentFloor = useBuilderStore((s) => s.currentFloor);
   const visibleFloors = useBuilderStore((s) => s.visibleFloors);
@@ -565,7 +566,7 @@ function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showS
           RIGHT: THREE.MOUSE.PAN,                      // right drag = pan
         }}
         touches={{
-          ONE: THREE.TOUCH.ROTATE,
+          ONE: activeTool === 'place' ? (undefined as unknown as THREE.TOUCH) : THREE.TOUCH.ROTATE,
           TWO: THREE.TOUCH.DOLLY_PAN,
         }}
       />

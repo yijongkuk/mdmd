@@ -14,7 +14,8 @@ import { PropertyPanel } from '@/components/builder/PropertyPanel';
 import { CostStatusBar } from '@/components/builder/CostStatusBar';
 import { BuilderToast } from '@/components/builder/BuilderToast';
 import { BoxSelectOverlay } from '@/components/builder/BoxSelectOverlay';
-import { FLOOR_HEIGHT } from '@/lib/constants/grid';
+import { FLOOR_HEIGHT, ROTATION_STEP } from '@/lib/constants/grid';
+import { RotateCcw, RotateCw } from 'lucide-react';
 import { getModuleById } from '@/lib/constants/modules';
 import { getMaterialById } from '@/lib/constants/materials';
 import { formatWon, formatDate } from '@/lib/utils/format';
@@ -265,6 +266,9 @@ export default function BuilderPage() {
 
   const showSurrounding = useBuilderStore((s) => s.showSurrounding);
   const showSatellite = useBuilderStore((s) => s.showSatellite);
+  const activeTool = useBuilderStore((s) => s.activeTool);
+  const ghostRotation = useBuilderStore((s) => s.ghostRotation);
+  const rotateGhost = useBuilderStore((s) => s.rotateGhost);
 
   // Boundary dimensions from regulation
   const boundaryWidth = regulation
@@ -329,6 +333,26 @@ export default function BuilderPage() {
         {/* Center: 3D Canvas */}
         <div className="absolute left-1/2 top-3 z-10 -translate-x-1/2 max-w-[calc(100vw-2rem)]">
           <BuilderToolbar />
+          {/* 모바일 + 배치 모드: 회전 버튼 */}
+          {isMobile && activeTool === 'place' && (
+            <div className="mt-2 flex items-center justify-center gap-2">
+              <button
+                className="flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 shadow-sm active:bg-slate-100"
+                onPointerDown={(e) => { e.stopPropagation(); rotateGhost(-1); }}
+              >
+                <RotateCcw className="h-4 w-4 text-slate-600" />
+                <span className="text-xs text-slate-600">-{ROTATION_STEP}°</span>
+              </button>
+              <span className="min-w-[3rem] text-center text-xs font-medium text-slate-500">{ghostRotation}°</span>
+              <button
+                className="flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 shadow-sm active:bg-slate-100"
+                onPointerDown={(e) => { e.stopPropagation(); rotateGhost(1); }}
+              >
+                <RotateCw className="h-4 w-4 text-slate-600" />
+                <span className="text-xs text-slate-600">+{ROTATION_STEP}°</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Toast message overlay */}

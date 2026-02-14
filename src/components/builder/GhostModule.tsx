@@ -39,7 +39,8 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
   const [ghostPos, setGhostPos] = useState<{ gridX: number; gridZ: number } | null>(null);
   const [hasCollision, setHasCollision] = useState(false);
   const [outOfBounds, setOutOfBounds] = useState(false);
-  const [ghostRotation, setGhostRotation] = useState<number>(0);
+  const ghostRotation = useBuilderStore((s) => s.ghostRotation);
+  const rotateGhost = useBuilderStore((s) => s.rotateGhost);
   // Track pointerDown screen position to distinguish click vs drag (orbit)
   const pointerDownRef = useRef<{ x: number; y: number } | null>(null);
   // 터치 배치 중인지 추적 (OrbitControls 제어용)
@@ -47,9 +48,8 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
 
   const moduleDef = selectedModuleDefId ? getModuleById(selectedModuleDefId) : undefined;
 
-  // Reset ghost rotation when switching modules
+  // Reset ghost position when switching modules (rotation is reset via store)
   useEffect(() => {
-    setGhostRotation(0);
     setGhostPos(null);
   }, [selectedModuleDefId]);
 
@@ -65,14 +65,13 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
 
       if ((e.key.toLowerCase() === 'r' || e.key === ' ') && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        const step = e.key === ' ' ? ROTATION_STEP : -ROTATION_STEP;
-        setGhostRotation((prev) => (prev + step + 360) % 360);
+        rotateGhost(e.key === ' ' ? 1 : -1);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeTool, moduleDef]);
+  }, [activeTool, moduleDef, rotateGhost]);
 
   // 터치 pointerup이 R3F plane 밖에서 발생할 경우 OrbitControls 복원
   useEffect(() => {

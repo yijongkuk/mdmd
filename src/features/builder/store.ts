@@ -39,6 +39,7 @@ interface BuilderStore {
   boxSelectRect: { x1: number; y1: number; x2: number; y2: number; crossing: boolean } | null;
   clipboard: Omit<ModulePlacement, 'id' | 'floor'>[] | null;
   parcelCenter: { lat: number; lng: number } | null;
+  ghostRotation: number;
 
   // Undo/Redo
   undoStack: ModulePlacement[][];
@@ -82,6 +83,7 @@ interface BuilderStore {
   loadPlacements: (placements: ModulePlacement[]) => void;
   clearAll: () => void;
   setParcelCenter: (center: { lat: number; lng: number } | null) => void;
+  rotateGhost: (direction: 1 | -1) => void;
 }
 
 function pushUndo(undoStack: ModulePlacement[][], snapshot: ModulePlacement[]): ModulePlacement[][] {
@@ -118,6 +120,7 @@ export const useBuilderStore = create<BuilderStore>((set) => ({
   boxSelectRect: null,
   clipboard: null,
   parcelCenter: null,
+  ghostRotation: 0,
   undoStack: [],
   redoStack: [],
 
@@ -133,8 +136,8 @@ export const useBuilderStore = create<BuilderStore>((set) => ({
   setActiveTool: (tool) =>
     set({
       activeTool: tool,
-      // Clear module selection when switching away from place
-      ...(tool !== 'place' ? { selectedModuleDefId: null } : {}),
+      // Clear module selection + ghost rotation when switching away from place
+      ...(tool !== 'place' ? { selectedModuleDefId: null, ghostRotation: 0 } : {}),
     }),
 
   selectModuleDef: (id) =>
@@ -351,4 +354,5 @@ export const useBuilderStore = create<BuilderStore>((set) => ({
     })),
 
   setParcelCenter: (center) => set({ parcelCenter: center }),
+  rotateGhost: (direction) => set((s) => ({ ghostRotation: (s.ghostRotation + ROTATION_STEP * direction + 360) % 360 })),
 }));
