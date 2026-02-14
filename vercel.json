@@ -1,4 +1,4 @@
 {
   "regions": ["icn1"],
-  "alias": ["modumodule.vercel.app"]
+  "alias": ["modumodule.vercel.app", "mdmd.vercel.app"]
 }
