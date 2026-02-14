@@ -333,23 +333,23 @@ export default function BuilderPage() {
         {/* Center: 3D Canvas */}
         <div className="absolute left-1/2 top-3 z-10 -translate-x-1/2 max-w-[calc(100vw-2rem)]">
           <BuilderToolbar />
-          {/* 모바일 + 배치 모드: 회전 버튼 */}
-          {isMobile && activeTool === 'place' && (
+          {/* 배치 모드: 회전 버튼 */}
+          {activeTool === 'place' && (
             <div className="mt-2 flex items-center justify-center gap-2">
               <button
-                className="flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 shadow-sm active:bg-slate-100"
+                className="flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 shadow-sm active:bg-slate-100 hover:bg-slate-50 cursor-pointer"
                 onPointerDown={(e) => { e.stopPropagation(); rotateGhost(-1); }}
               >
                 <RotateCcw className="h-4 w-4 text-slate-600" />
-                <span className="text-xs text-slate-600">-{ROTATION_STEP}°</span>
+                <span className="text-xs text-slate-600">{isMobile ? `-${ROTATION_STEP}°` : `R`}</span>
               </button>
               <span className="min-w-[3rem] text-center text-xs font-medium text-slate-500">{ghostRotation}°</span>
               <button
-                className="flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 shadow-sm active:bg-slate-100"
+                className="flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 shadow-sm active:bg-slate-100 hover:bg-slate-50 cursor-pointer"
                 onPointerDown={(e) => { e.stopPropagation(); rotateGhost(1); }}
               >
                 <RotateCw className="h-4 w-4 text-slate-600" />
-                <span className="text-xs text-slate-600">+{ROTATION_STEP}°</span>
+                <span className="text-xs text-slate-600">{isMobile ? `+${ROTATION_STEP}°` : `Space`}</span>
               </button>
             </div>
           )}
