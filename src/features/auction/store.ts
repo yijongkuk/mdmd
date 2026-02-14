@@ -18,6 +18,8 @@ interface AuctionState {
   progress: LoadingProgress | null;
   /** API 에러 메시지 (OnBid 한도 초과 등) */
   apiError: string | null;
+  /** retry 트리거 카운터 */
+  retryCounter: number;
 
   /** 캐시에 매물 병합 (새 항목 또는 좌표 업데이트) */
   mergeResults: (properties: AuctionProperty[]) => void;
@@ -33,6 +35,8 @@ interface AuctionState {
   hydrateFromStorage: () => boolean;
   /** 캐시 초기화 */
   clearCache: () => void;
+  /** 캐시 초기화 + 에러 리셋 + 재수집 트리거 */
+  triggerRetry: () => void;
 }
 
 export const useAuctionStore = create<AuctionState>((set, get) => ({
@@ -43,6 +47,7 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
   loadingRegion: '',
   progress: null,
   apiError: null,
+  retryCounter: 0,
 
   mergeResults: (properties) => {
     const { cache } = get();
@@ -137,5 +142,17 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
     get().cache.clear();
     try { localStorage.removeItem(STORAGE_KEY); } catch { /* */ }
     set({ version: get().version + 1, initialFetchDone: false });
+  },
+
+  triggerRetry: () => {
+    const s = get();
+    s.cache.clear();
+    try { localStorage.removeItem(STORAGE_KEY); } catch { /* */ }
+    set({
+      version: s.version + 1,
+      initialFetchDone: false,
+      apiError: null,
+      retryCounter: s.retryCounter + 1,
+    });
   },
 }));

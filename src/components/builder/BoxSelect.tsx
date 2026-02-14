@@ -85,6 +85,8 @@ export function BoxSelect({ parcelOffset = { x: 0, z: 0 } }: BoxSelectProps) {
     const onPointerDown = (e: PointerEvent) => {
       if (latestRef.current.activeTool !== 'select') return;
       if (e.button !== 0) return;
+      // 터치 이벤트는 박스 선택 제외 (모바일에서 OrbitControls 사용)
+      if (e.pointerType === 'touch') return;
       // 모듈 드래그 중이면 박스 선택 시작하지 않음
       if (latestRef.current.draggingPlacementId || isGridDragging()) return;
 

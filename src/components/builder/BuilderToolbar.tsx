@@ -129,7 +129,7 @@ export function BuilderToolbar() {
   }, [activeTool, setActiveTool, undo, redo, selectedPlacementIds, rotatePlacement, copyPlacements, pastePlacements, removePlacement, selectPlacement, showToast, toggleGridSnap, toggleViewAllFloors]);
 
   return (
-    <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 shadow-sm">
+    <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 shadow-sm overflow-x-auto">
       {TOOLS.map((tool) => (
         <Tooltip key={tool.id}>
           <TooltipTrigger asChild>

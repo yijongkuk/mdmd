@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
+import { cn } from '@/lib/cn';
 import { useBuilderStore } from '@/features/builder/store';
 import { useRegulations } from '@/features/regulations/hooks';
 import { Sidebar } from '@/components/layout/Sidebar';
@@ -22,6 +23,7 @@ import type { ParcelInfo } from '@/types/land';
 import type { ModulePlacement } from '@/types/builder';
 import { fetchParcelByPnu } from '@/features/land/services';
 import { useSpeckleSync } from '@/lib/speckle/useSpeckleSync';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 const BuilderCanvas = dynamic(
   () => import('@/components/builder/BuilderCanvas').then((m) => m.BuilderCanvas),
@@ -59,7 +61,10 @@ export default function BuilderPage() {
   const placements = useBuilderStore((s) => s.placements);
   const setParcelCenter = useBuilderStore((s) => s.setParcelCenter);
 
+  const isMobile = useIsMobile();
+
   const [parcelInfo, setParcelInfo] = useState<ParcelInfo | null>(null);
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
@@ -67,6 +72,14 @@ export default function BuilderPage() {
   const [minBidPrice, setMinBidPrice] = useState(queryMinBid);
   const [bidStartDate, setBidStartDate] = useState(queryBidStart);
   const [bidEndDate, setBidEndDate] = useState(queryBidEnd);
+  // 모바일에서 사이드바 자동 닫기
+  useEffect(() => {
+    if (isMobile) {
+      setLeftSidebarOpen(false);
+      setRightSidebarOpen(false);
+    }
+  }, [isMobile]);
+
   // effectivePnu: URL 쿼리 우선, 없으면 DB에서 로드한 값 사용
   const [dbParcelPnu, setDbParcelPnu] = useState<string | null>(null);
   const effectivePnu = parcelPnu ?? dbParcelPnu;
@@ -260,7 +273,7 @@ export default function BuilderPage() {
     <div className="flex flex-col overflow-hidden" style={{ height: 'calc(100vh - 3.5rem)' }}>
       {/* Parcel info banner */}
       {(parcelInfo || appraisalValue > 0) && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-200 bg-blue-50 px-4 py-2 text-sm">
+        <div className={cn('flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-200 bg-blue-50 px-4 py-2', isMobile ? 'text-xs' : 'text-sm')}>
           {parcelInfo && (
             <>
               <span className="font-medium text-blue-900">{parcelInfo.address}</span>
@@ -304,7 +317,7 @@ export default function BuilderPage() {
 
       <div className="relative flex-1 overflow-hidden bg-slate-100">
         {/* Center: 3D Canvas */}
-        <div className="absolute left-1/2 top-3 z-10 -translate-x-1/2">
+        <div className="absolute left-1/2 top-3 z-10 -translate-x-1/2 max-w-[calc(100vw-2rem)]">
           <BuilderToolbar />
         </div>
 
@@ -330,12 +343,24 @@ export default function BuilderPage() {
         />
 
         {/* Left sidebar: Module library (overlay) */}
-        <Sidebar side="left" defaultOpen width="w-72">
+        <Sidebar
+          side="left"
+          defaultOpen={!isMobile}
+          open={leftSidebarOpen}
+          width={isMobile ? 'w-[calc(100vw-3rem)]' : 'w-72'}
+          onOpenChange={setLeftSidebarOpen}
+        >
           <ModuleLibrary />
         </Sidebar>
 
         {/* Right sidebar: Property panel (overlay) */}
-        <Sidebar side="right" defaultOpen width="w-72" onOpenChange={setRightSidebarOpen}>
+        <Sidebar
+          side="right"
+          defaultOpen={!isMobile}
+          open={rightSidebarOpen}
+          width={isMobile ? 'w-[calc(100vw-3rem)]' : 'w-72'}
+          onOpenChange={setRightSidebarOpen}
+        >
           <PropertyPanel
             onSave={manualSave}
             saveStatus={saveStatus}

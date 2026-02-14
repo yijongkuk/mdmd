@@ -173,6 +173,7 @@ export function useAuctionProperties(
   zoomLevel?: number,
 ) {
   const store = useAuctionStore();
+  const retryCounter = useAuctionStore((s) => s.retryCounter);
   const fetchingRef = useRef(false);
 
   useEffect(() => {
@@ -409,8 +410,11 @@ export function useAuctionProperties(
         // OnBid 완료 후에도 폐교 geocode가 아직 진행중일 수 있음 — 기다리지 않음
         void closedSchoolPromise;
       } finally {
-        // 수집 완료 — localStorage에 캐시 저장 (새로고침 시 즉시 복원)
-        store.persistToStorage();
+        // 수집 완료 — 에러 없을 때만 localStorage에 캐시 저장
+        const currentApiError = useAuctionStore.getState().apiError;
+        if (!currentApiError) {
+          store.persistToStorage();
+        }
         store.setIsLoading(false);
         store.setLoadingRegion('');
         store.setProgress(null);
@@ -418,7 +422,7 @@ export function useAuctionProperties(
       }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled]);
+  }, [enabled, retryCounter]);
 
   const properties = useMemo(() => {
     return Array.from(store.cache.values());
@@ -428,11 +432,8 @@ export function useAuctionProperties(
   const totalCount = properties.length;
 
   const retry = useCallback(() => {
-    const s = useAuctionStore.getState();
-    s.clearCache();
-    s.setApiError(null);
     fetchingRef.current = false;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    useAuctionStore.getState().triggerRetry();
   }, []);
 
   return {

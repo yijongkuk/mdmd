@@ -564,6 +564,10 @@ function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showS
           MIDDLE: THREE.MOUSE.ROTATE,                  // wheel drag = orbit
           RIGHT: THREE.MOUSE.PAN,                      // right drag = pan
         }}
+        touches={{
+          ONE: THREE.TOUCH.ROTATE,
+          TWO: THREE.TOUCH.DOLLY_PAN,
+        }}
       />
 
       {/* Mirror Z + camera from north: north=screen top, east=screen right (matches 2D map) */}

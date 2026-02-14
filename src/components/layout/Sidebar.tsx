@@ -8,6 +8,8 @@ interface SidebarProps {
   children: React.ReactNode;
   side?: 'left' | 'right';
   defaultOpen?: boolean;
+  /** Controlled open state — overrides internal state when provided */
+  open?: boolean;
   width?: string;
   className?: string;
   onOpenChange?: (open: boolean) => void;
@@ -17,18 +19,22 @@ export function Sidebar({
   children,
   side = 'left',
   defaultOpen = true,
+  open: controlledOpen,
   width = 'w-80',
   className,
   onOpenChange,
 }: SidebarProps) {
-  const [open, setOpen] = useState(() => {
+  const [internalOpen, setInternalOpen] = useState(() => {
     if (onOpenChange) onOpenChange(defaultOpen);
     return defaultOpen;
   });
 
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : internalOpen;
+
   const toggle = () => {
     const next = !open;
-    setOpen(next);
+    if (!isControlled) setInternalOpen(next);
     onOpenChange?.(next);
   };
 
