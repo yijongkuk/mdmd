@@ -85,47 +85,91 @@ export function BoxSelect({ parcelOffset = { x: 0, z: 0 } }: BoxSelectProps) {
   /** 터치 롱프레스 대기 시간 (ms) */
   const LONG_PRESS_MS = 2000;
 
+  /** 롱프레스 타이머 안전 취소 */
+  const cancelLongPress = () => {
+    const s = stateRef.current;
+    if (s.longPressTimer) {
+      clearTimeout(s.longPressTimer);
+      s.longPressTimer = null;
+    }
+  };
+
   useEffect(() => {
     const el = gl.domElement;
+
+    // ── 터치 전용: touchstart/touchmove/touchend로 손가락 수 추적 ──
+    const onTouchStart = (e: TouchEvent) => {
+      // 두 손가락 이상 → 롱프레스 즉시 취소 (핀치줌/팬 제스처)
+      if (e.touches.length > 1) {
+        cancelLongPress();
+        return;
+      }
+      // 한 손가락이고 select 모드일 때만 롱프레스 시작
+      if (latestRef.current.activeTool !== 'select') return;
+      if (latestRef.current.draggingPlacementId || isGridDragging()) return;
+
+      const touch = e.touches[0];
+      const startX = touch.clientX;
+      const startY = touch.clientY;
+
+      const timer = setTimeout(() => {
+        if (isGridDragging()) return;
+        stateRef.current.longPressReady = true;
+        stateRef.current.isTracking = true;
+        // OrbitControls 비활성화 — 박스 선택 우선
+        const ctrl = latestRef.current.controls;
+        if (ctrl) (ctrl as any).enabled = false;
+        // 토스트로 모드 전환 알림
+        useBuilderStore.getState().showToast('영역 선택 모드', 'info');
+      }, LONG_PRESS_MS);
+
+      stateRef.current = {
+        isTracking: false,
+        isBoxSelecting: false,
+        startX,
+        startY,
+        isTouch: true,
+        longPressTimer: timer,
+        longPressReady: false,
+      };
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      const s = stateRef.current;
+      // 멀티터치 진입 → 즉시 취소
+      if (e.touches.length > 1) {
+        cancelLongPress();
+        return;
+      }
+      // 롱프레스 대기 중 손가락 이동 → 타이머 취소 (5px 이상)
+      if (s.longPressTimer && !s.longPressReady && e.touches.length === 1) {
+        const t = e.touches[0];
+        const dx = t.clientX - s.startX;
+        const dy = t.clientY - s.startY;
+        if (dx * dx + dy * dy > 25) {
+          cancelLongPress();
+        }
+      }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      // 모든 손가락 떼기 전에 롱프레스 대기 중이면 취소
+      if (!stateRef.current.longPressReady) {
+        cancelLongPress();
+      }
+    };
 
     const onPointerDown = (e: PointerEvent) => {
       if (latestRef.current.activeTool !== 'select') return;
       if (e.button !== 0) return;
+      // 터치는 touchstart에서 처리 — pointerdown 무시
+      if (e.pointerType === 'touch') return;
       // 모듈 드래그 중이면 박스 선택 시작하지 않음
       if (latestRef.current.draggingPlacementId || isGridDragging()) return;
 
-      const isTouch = e.pointerType === 'touch';
+      // 마우스: 기존 로직
       const startX = e.clientX;
       const startY = e.clientY;
-
-      if (isTouch) {
-        // 터치: 롱프레스 타이머 시작 — 2초 후 박스 선택 모드 진입
-        const timer = setTimeout(() => {
-          if (isGridDragging()) return;
-          stateRef.current.longPressReady = true;
-          stateRef.current.isTracking = true;
-          // OrbitControls 비활성화 — 박스 선택 우선
-          const ctrl = latestRef.current.controls;
-          if (ctrl) (ctrl as any).enabled = false;
-          // 토스트로 모드 전환 알림
-          useBuilderStore.getState().showToast('영역 선택 모드', 'info');
-        }, LONG_PRESS_MS);
-
-        stateRef.current = {
-          isTracking: false,
-          isBoxSelecting: false,
-          startX,
-          startY,
-          isTouch: true,
-          longPressTimer: timer,
-          longPressReady: false,
-        };
-        return;
-      }
-
-      // 마우스: 기존 로직
-      // Defer tracking to let R3F event handlers fire first
-      // (R3F's onPointerDown in BuildableVolume sets _gridDragging)
       queueMicrotask(() => {
         if (isGridDragging()) return;
         stateRef.current = {
@@ -142,18 +186,6 @@ export function BoxSelect({ parcelOffset = { x: 0, z: 0 } }: BoxSelectProps) {
 
     const onPointerMove = (e: PointerEvent) => {
       const s = stateRef.current;
-
-      // 터치 롱프레스 대기 중 손가락이 움직이면 타이머 취소 (일반 터치 조작)
-      if (s.isTouch && s.longPressTimer && !s.longPressReady) {
-        const dx = e.clientX - s.startX;
-        const dy = e.clientY - s.startY;
-        if (dx * dx + dy * dy > 100) {
-          clearTimeout(s.longPressTimer);
-          s.longPressTimer = null;
-          return;
-        }
-        return;
-      }
 
       if (!s.isTracking) return;
       if (latestRef.current.activeTool !== 'select') {
@@ -201,10 +233,7 @@ export function BoxSelect({ parcelOffset = { x: 0, z: 0 } }: BoxSelectProps) {
       const s = stateRef.current;
 
       // 터치 롱프레스 타이머 정리
-      if (s.longPressTimer) {
-        clearTimeout(s.longPressTimer);
-        s.longPressTimer = null;
-      }
+      cancelLongPress();
 
       if (s.isBoxSelecting) {
         const {
@@ -327,11 +356,17 @@ export function BoxSelect({ parcelOffset = { x: 0, z: 0 } }: BoxSelectProps) {
     };
 
     el.addEventListener('pointerdown', onPointerDown);
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: true });
+    el.addEventListener('touchend', onTouchEnd, { passive: true });
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
 
     return () => {
       el.removeEventListener('pointerdown', onPointerDown);
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       // 롱프레스 타이머 정리
