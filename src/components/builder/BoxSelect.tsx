@@ -77,7 +77,13 @@ export function BoxSelect({ parcelOffset = { x: 0, z: 0 } }: BoxSelectProps) {
     isBoxSelecting: false,
     startX: 0,
     startY: 0,
+    isTouch: false,
+    longPressTimer: null as ReturnType<typeof setTimeout> | null,
+    longPressReady: false,
   });
+
+  /** 터치 롱프레스 대기 시간 (ms) */
+  const LONG_PRESS_MS = 2000;
 
   useEffect(() => {
     const el = gl.domElement;
@@ -85,15 +91,39 @@ export function BoxSelect({ parcelOffset = { x: 0, z: 0 } }: BoxSelectProps) {
     const onPointerDown = (e: PointerEvent) => {
       if (latestRef.current.activeTool !== 'select') return;
       if (e.button !== 0) return;
-      // 터치 이벤트는 박스 선택 제외 (모바일에서 OrbitControls 사용)
-      if (e.pointerType === 'touch') return;
       // 모듈 드래그 중이면 박스 선택 시작하지 않음
       if (latestRef.current.draggingPlacementId || isGridDragging()) return;
 
-      // Defer tracking to let R3F event handlers fire first
-      // (R3F's onPointerDown in BuildableVolume sets _gridDragging)
+      const isTouch = e.pointerType === 'touch';
       const startX = e.clientX;
       const startY = e.clientY;
+
+      if (isTouch) {
+        // 터치: 롱프레스 타이머 시작 — 2초 후 박스 선택 모드 진입
+        const timer = setTimeout(() => {
+          if (isGridDragging()) return;
+          stateRef.current.longPressReady = true;
+          stateRef.current.isTracking = true;
+          // OrbitControls 비활성화 — 박스 선택 우선
+          const ctrl = latestRef.current.controls;
+          if (ctrl) (ctrl as any).enabled = false;
+        }, LONG_PRESS_MS);
+
+        stateRef.current = {
+          isTracking: false,
+          isBoxSelecting: false,
+          startX,
+          startY,
+          isTouch: true,
+          longPressTimer: timer,
+          longPressReady: false,
+        };
+        return;
+      }
+
+      // 마우스: 기존 로직
+      // Defer tracking to let R3F event handlers fire first
+      // (R3F's onPointerDown in BuildableVolume sets _gridDragging)
       queueMicrotask(() => {
         if (isGridDragging()) return;
         stateRef.current = {
@@ -101,12 +131,28 @@ export function BoxSelect({ parcelOffset = { x: 0, z: 0 } }: BoxSelectProps) {
           isBoxSelecting: false,
           startX,
           startY,
+          isTouch: false,
+          longPressTimer: null,
+          longPressReady: false,
         };
       });
     };
 
     const onPointerMove = (e: PointerEvent) => {
       const s = stateRef.current;
+
+      // 터치 롱프레스 대기 중 손가락이 움직이면 타이머 취소 (일반 터치 조작)
+      if (s.isTouch && s.longPressTimer && !s.longPressReady) {
+        const dx = e.clientX - s.startX;
+        const dy = e.clientY - s.startY;
+        if (dx * dx + dy * dy > 100) {
+          clearTimeout(s.longPressTimer);
+          s.longPressTimer = null;
+          return;
+        }
+        return;
+      }
+
       if (!s.isTracking) return;
       if (latestRef.current.activeTool !== 'select') {
         s.isTracking = false;
@@ -129,8 +175,11 @@ export function BoxSelect({ parcelOffset = { x: 0, z: 0 } }: BoxSelectProps) {
 
       if (!s.isBoxSelecting && dx * dx + dy * dy > 25) {
         s.isBoxSelecting = true;
-        const ctrl = latestRef.current.controls;
-        if (ctrl) (ctrl as any).enabled = false;
+        if (!s.isTouch) {
+          // 마우스만: 첫 박스선택 진입 시 OrbitControls 비활성화 (터치는 롱프레스에서 이미 처리)
+          const ctrl = latestRef.current.controls;
+          if (ctrl) (ctrl as any).enabled = false;
+        }
       }
 
       if (s.isBoxSelecting) {
@@ -148,6 +197,12 @@ export function BoxSelect({ parcelOffset = { x: 0, z: 0 } }: BoxSelectProps) {
 
     const onPointerUp = (e: PointerEvent) => {
       const s = stateRef.current;
+
+      // 터치 롱프레스 타이머 정리
+      if (s.longPressTimer) {
+        clearTimeout(s.longPressTimer);
+        s.longPressTimer = null;
+      }
 
       if (s.isBoxSelecting) {
         const {
@@ -263,6 +318,9 @@ export function BoxSelect({ parcelOffset = { x: 0, z: 0 } }: BoxSelectProps) {
         isBoxSelecting: false,
         startX: 0,
         startY: 0,
+        isTouch: false,
+        longPressTimer: null,
+        longPressReady: false,
       };
     };
 
@@ -274,6 +332,10 @@ export function BoxSelect({ parcelOffset = { x: 0, z: 0 } }: BoxSelectProps) {
       el.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
+      // 롱프레스 타이머 정리
+      if (stateRef.current.longPressTimer) {
+        clearTimeout(stateRef.current.longPressTimer);
+      }
       // Restore controls if component unmounts during box select
       const ctrl = latestRef.current.controls;
       if (ctrl && !(ctrl as any).enabled) {

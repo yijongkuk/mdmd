@@ -80,6 +80,16 @@ export default function BuilderPage() {
     }
   }, [isMobile]);
 
+  // 모바일: 사이드바 하나만 열리게 (상호 배타)
+  const handleLeftSidebarChange = useCallback((open: boolean) => {
+    setLeftSidebarOpen(open);
+    if (isMobile && open) setRightSidebarOpen(false);
+  }, [isMobile]);
+  const handleRightSidebarChange = useCallback((open: boolean) => {
+    setRightSidebarOpen(open);
+    if (isMobile && open) setLeftSidebarOpen(false);
+  }, [isMobile]);
+
   // effectivePnu: URL 쿼리 우선, 없으면 DB에서 로드한 값 사용
   const [dbParcelPnu, setDbParcelPnu] = useState<string | null>(null);
   const effectivePnu = parcelPnu ?? dbParcelPnu;
@@ -326,12 +336,15 @@ export default function BuilderPage() {
 
         {/* Box select rectangle overlay */}
         <BoxSelectOverlay />
-        <div
-          className="absolute bottom-3 z-30 transition-[right] duration-300"
-          style={{ right: rightSidebarOpen ? 'calc(18rem + 0.75rem)' : '0.75rem' }}
-        >
-          <FloorNavigator />
-        </div>
+        {/* 층 네비게이터 — 모바일에서 사이드바 열릴 때 숨김 */}
+        {!(isMobile && (leftSidebarOpen || rightSidebarOpen)) && (
+          <div
+            className="absolute bottom-3 z-30 transition-[right] duration-300"
+            style={{ right: rightSidebarOpen ? 'calc(18rem + 0.75rem)' : '0.75rem' }}
+          >
+            <FloorNavigator />
+          </div>
+        )}
         <BuilderCanvas
           boundaryWidth={boundaryWidth}
           boundaryDepth={boundaryDepth}
@@ -348,7 +361,7 @@ export default function BuilderPage() {
           defaultOpen={!isMobile}
           open={leftSidebarOpen}
           width={isMobile ? 'w-[calc(100vw-3rem)]' : 'w-72'}
-          onOpenChange={setLeftSidebarOpen}
+          onOpenChange={handleLeftSidebarChange}
         >
           <ModuleLibrary />
         </Sidebar>
@@ -359,7 +372,7 @@ export default function BuilderPage() {
           defaultOpen={!isMobile}
           open={rightSidebarOpen}
           width={isMobile ? 'w-[calc(100vw-3rem)]' : 'w-72'}
-          onOpenChange={setRightSidebarOpen}
+          onOpenChange={handleRightSidebarChange}
         >
           <PropertyPanel
             onSave={manualSave}
