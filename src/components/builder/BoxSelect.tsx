@@ -107,6 +107,8 @@ export function BoxSelect({ parcelOffset = { x: 0, z: 0 } }: BoxSelectProps) {
           // OrbitControls 비활성화 — 박스 선택 우선
           const ctrl = latestRef.current.controls;
           if (ctrl) (ctrl as any).enabled = false;
+          // 토스트로 모드 전환 알림
+          useBuilderStore.getState().showToast('영역 선택 모드', 'info');
         }, LONG_PRESS_MS);
 
         stateRef.current = {
