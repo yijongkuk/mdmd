@@ -87,21 +87,16 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
     [moduleDef],
   );
 
-  const handlePointerMove = useCallback(
-    (e: ThreeEvent<PointerEvent>) => {
-      if (activeTool !== 'place' || !moduleDef) return;
-      e.stopPropagation();
-
-      const point = e.point;
-      // Convert world-space hit → local (parcelOffset group) space
+  /** 월드 좌표에서 고스트 위치 + 충돌 계산 */
+  const updateGhostFromPoint = useCallback(
+    (point: THREE.Vector3) => {
+      if (!moduleDef) return null;
       const localX = point.x - parcelOffset.x;
       const localZ = -point.z - parcelOffset.z;
 
-      // ghostPos = module CENTER in grid coordinates
       const grid = worldToGridSnapped(localX, localZ, gridOffset.x, gridOffset.z, gridSnap);
       setGhostPos({ gridX: grid.gridX, gridZ: grid.gridZ });
 
-      // Compute corner for OBB collision
       const corner = centerToCorner(grid.gridX, grid.gridZ, ghostRotation);
       const obb = placementToOBB(
         corner.gridX, corner.gridZ,
@@ -114,7 +109,6 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
         gridOffset.x, gridOffset.z,
       );
 
-      // Check if module extends outside the buildable polygon
       let oob = false;
       if (buildablePolygon && buildablePolygon.length >= 3) {
         oob = !checkOBBInBounds(obb, buildablePolygon);
@@ -122,8 +116,20 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
 
       setOutOfBounds(oob);
       setHasCollision(result.hasCollision || oob);
+      return { grid, collision: result.hasCollision || oob, oob };
     },
-    [activeTool, moduleDef, currentFloor, placements, ghostRotation, gridOffset, gridSnap, parcelOffset, buildablePolygon, centerToCorner],
+    [moduleDef, currentFloor, placements, ghostRotation, gridOffset, gridSnap, parcelOffset, buildablePolygon, centerToCorner],
+  );
+
+  const handlePointerMove = useCallback(
+    (e: ThreeEvent<PointerEvent>) => {
+      if (activeTool !== 'place' || !moduleDef) return;
+      // 터치 이동 시 고스트 추적 안 함 — 오빗 제스처와 충돌 방지
+      if (e.nativeEvent.pointerType === 'touch') return;
+      e.stopPropagation();
+      updateGhostFromPoint(e.point);
+    },
+    [activeTool, moduleDef, updateGhostFromPoint],
   );
 
   const handlePointerDown = useCallback(
@@ -136,7 +142,7 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
 
   const handleClick = useCallback(
     (e: ThreeEvent<MouseEvent>) => {
-      if (activeTool !== 'place' || !moduleDef || !ghostPos) return;
+      if (activeTool !== 'place' || !moduleDef) return;
       // Distinguish click from drag (orbit) — 5px threshold
       const start = pointerDownRef.current;
       if (start) {
@@ -147,13 +153,19 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
       // Always stop propagation to prevent exiting place mode
       e.stopPropagation();
 
-      if (hasCollision) {
-        showToast(outOfBounds ? '건축 영역 밖입니다' : '설치할 수 없는 위치입니다');
+      // 터치 탭: ghostPos가 없으므로 클릭 지점에서 직접 계산
+      const info = ghostPos
+        ? { grid: ghostPos, collision: hasCollision, oob: outOfBounds }
+        : updateGhostFromPoint(e.point);
+      if (!info) return;
+
+      if (info.collision) {
+        showToast(info.oob ? '건축 영역 밖입니다' : '설치할 수 없는 위치입니다');
         return;
       }
 
       // Convert center → corner for storage
-      const corner = centerToCorner(ghostPos.gridX, ghostPos.gridZ, ghostRotation);
+      const corner = centerToCorner(info.grid.gridX, info.grid.gridZ, ghostRotation);
       addPlacement({
         moduleId: moduleDef.id,
         gridX: corner.gridX,
@@ -163,7 +175,7 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
         floor: currentFloor,
       });
     },
-    [activeTool, moduleDef, ghostPos, hasCollision, outOfBounds, currentFloor, addPlacement, ghostRotation, showToast, centerToCorner],
+    [activeTool, moduleDef, ghostPos, hasCollision, outOfBounds, currentFloor, addPlacement, ghostRotation, showToast, centerToCorner, updateGhostFromPoint],
   );
 
   if (activeTool !== 'place' || !moduleDef) return null;
