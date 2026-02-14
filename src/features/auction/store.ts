@@ -3,7 +3,7 @@ import type { AuctionProperty } from '@/types/auction';
 import type { LoadingProgress } from './hooks';
 
 const STORAGE_KEY = 'auction-cache';
-const STORAGE_TTL = 4 * 60 * 60 * 1000; // 4시간
+const STORAGE_TTL = 24 * 60 * 60 * 1000; // 24시간
 
 interface AuctionState {
   /** 수집된 매물 캐시 (id → property) */
@@ -74,27 +74,60 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
   persistToStorage: () => {
     try {
       const { cache } = get();
-      const data = Array.from(cache.entries());
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ timestamp: Date.now(), data }));
-    } catch { /* quota exceeded 등 무시 */ }
+      // 좌표 있는 매물만 저장 (좌표 없는 건 지도에 안 보이고 어차피 재지오코딩 필요)
+      const geocoded = Array.from(cache.entries()).filter(([, p]) => p.lat != null);
+      const payload = JSON.stringify({ timestamp: Date.now(), data: geocoded });
+      localStorage.setItem(STORAGE_KEY, payload);
+      console.log(`[auction-cache] ${geocoded.length}건 저장 (${(payload.length / 1024).toFixed(0)}KB)`);
+    } catch (e) {
+      console.warn('[auction-cache] localStorage 저장 실패:', e);
+      // quota 초과 시 기존 캐시 정리 후 재시도
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+        const { cache } = get();
+        const geocoded = Array.from(cache.entries()).filter(([, p]) => p.lat != null);
+        // 필수 필드만 남겨 용량 축소
+        const slim = geocoded.map(([id, p]) => [id, {
+          id: p.id, name: p.name, address: p.address,
+          disposalMethod: p.disposalMethod,
+          minBidPrice: p.minBidPrice, appraisalValue: p.appraisalValue,
+          bidStartDate: p.bidStartDate, bidEndDate: p.bidEndDate,
+          itemType: p.itemType, status: p.status, onbidUrl: p.onbidUrl,
+          pnu: p.pnu, area: p.area, officialLandPrice: p.officialLandPrice,
+          lat: p.lat, lng: p.lng, source: p.source,
+        }] as [string, AuctionProperty]);
+        const slimPayload = JSON.stringify({ timestamp: Date.now(), data: slim });
+        localStorage.setItem(STORAGE_KEY, slimPayload);
+        console.log(`[auction-cache] slim 모드 ${slim.length}건 저장 (${(slimPayload.length / 1024).toFixed(0)}KB)`);
+      } catch {
+        console.warn('[auction-cache] slim 저장도 실패 — 캐시 비활성화');
+      }
+    }
   },
 
   hydrateFromStorage: () => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return false;
+      if (!raw) {
+        console.log('[auction-cache] localStorage에 캐시 없음');
+        return false;
+      }
       const { timestamp, data } = JSON.parse(raw) as {
         timestamp: number;
         data: [string, AuctionProperty][];
       };
-      if (Date.now() - timestamp > STORAGE_TTL) {
+      const ageMs = Date.now() - timestamp;
+      if (ageMs > STORAGE_TTL) {
+        console.log(`[auction-cache] TTL 만료 (${(ageMs / 3600000).toFixed(1)}시간 경과)`);
         localStorage.removeItem(STORAGE_KEY);
         return false;
       }
       const cache = new Map(data);
+      console.log(`[auction-cache] ${cache.size}건 복원 (${(ageMs / 60000).toFixed(0)}분 전 저장)`);
       set({ cache, version: get().version + 1, initialFetchDone: true });
       return true;
-    } catch {
+    } catch (e) {
+      console.warn('[auction-cache] 복원 실패:', e);
       localStorage.removeItem(STORAGE_KEY);
       return false;
     }
