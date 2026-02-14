@@ -83,7 +83,7 @@ export function BoxSelect({ parcelOffset = { x: 0, z: 0 } }: BoxSelectProps) {
   });
 
   /** 터치 롱프레스 대기 시간 (ms) */
-  const LONG_PRESS_MS = 2000;
+  const LONG_PRESS_MS = 1500;
 
   /** 롱프레스 타이머 안전 취소 */
   const cancelLongPress = () => {
