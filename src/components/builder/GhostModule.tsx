@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import * as THREE from 'three';
-import { ThreeEvent } from '@react-three/fiber';
+import { ThreeEvent, useThree } from '@react-three/fiber';
 import { Edges } from '@react-three/drei';
 import { useBuilderStore } from '@/features/builder/store';
 import { getModuleById } from '@/lib/constants/modules';
@@ -26,6 +26,7 @@ interface GhostModuleProps {
 }
 
 export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }: GhostModuleProps) {
+  const controls = useThree((s) => s.controls);
   const activeTool = useBuilderStore((s) => s.activeTool);
   const selectedModuleDefId = useBuilderStore((s) => s.selectedModuleDefId);
   const currentFloor = useBuilderStore((s) => s.currentFloor);
@@ -41,6 +42,8 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
   const [ghostRotation, setGhostRotation] = useState<number>(0);
   // Track pointerDown screen position to distinguish click vs drag (orbit)
   const pointerDownRef = useRef<{ x: number; y: number } | null>(null);
+  // 터치 배치 중인지 추적 (OrbitControls 제어용)
+  const touchPlacingRef = useRef(false);
 
   const moduleDef = selectedModuleDefId ? getModuleById(selectedModuleDefId) : undefined;
 
@@ -70,6 +73,18 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [activeTool, moduleDef]);
+
+  // 터치 pointerup이 R3F plane 밖에서 발생할 경우 OrbitControls 복원
+  useEffect(() => {
+    const onPointerUp = (e: PointerEvent) => {
+      if (e.pointerType === 'touch' && touchPlacingRef.current) {
+        touchPlacingRef.current = false;
+        if (controls) (controls as any).enabled = true;
+      }
+    };
+    window.addEventListener('pointerup', onPointerUp);
+    return () => window.removeEventListener('pointerup', onPointerUp);
+  }, [controls]);
 
   // Helper: compute corner gridX/gridZ from center gridX/gridZ
   const centerToCorner = useCallback(
@@ -124,8 +139,8 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
   const handlePointerMove = useCallback(
     (e: ThreeEvent<PointerEvent>) => {
       if (activeTool !== 'place' || !moduleDef) return;
-      // 터치 이동 시 고스트 추적 안 함 — 오빗 제스처와 충돌 방지
-      if (e.nativeEvent.pointerType === 'touch') return;
+      // 터치: touchPlacing 모드일 때만 고스트 추적
+      if (e.nativeEvent.pointerType === 'touch' && !touchPlacingRef.current) return;
       e.stopPropagation();
       updateGhostFromPoint(e.point);
     },
@@ -136,31 +151,55 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
     (e: ThreeEvent<PointerEvent>) => {
       if (activeTool !== 'place') return;
       pointerDownRef.current = { x: e.nativeEvent.clientX, y: e.nativeEvent.clientY };
+
+      // 터치 배치 모드: OrbitControls 비활성화 + 고스트 즉시 표시
+      if (e.nativeEvent.pointerType === 'touch' && moduleDef) {
+        touchPlacingRef.current = true;
+        if (controls) (controls as any).enabled = false;
+        updateGhostFromPoint(e.point);
+      }
     },
-    [activeTool],
+    [activeTool, moduleDef, controls, updateGhostFromPoint],
   );
+
+  /** 터치 배치 완료/취소 시 정리 */
+  const finishTouchPlacing = useCallback(() => {
+    if (touchPlacingRef.current) {
+      touchPlacingRef.current = false;
+      if (controls) (controls as any).enabled = true;
+    }
+  }, [controls]);
 
   const handleClick = useCallback(
     (e: ThreeEvent<MouseEvent>) => {
       if (activeTool !== 'place' || !moduleDef) return;
-      // Distinguish click from drag (orbit) — 5px threshold
-      const start = pointerDownRef.current;
-      if (start) {
-        const dx = e.nativeEvent.clientX - start.x;
-        const dy = e.nativeEvent.clientY - start.y;
-        if (dx * dx + dy * dy > 25) return;
+
+      const isTouch = touchPlacingRef.current;
+
+      // 마우스: 드래그(오빗)와 클릭 구분 — 5px threshold
+      if (!isTouch) {
+        const start = pointerDownRef.current;
+        if (start) {
+          const dx = e.nativeEvent.clientX - start.x;
+          const dy = e.nativeEvent.clientY - start.y;
+          if (dx * dx + dy * dy > 25) return;
+        }
       }
+
       // Always stop propagation to prevent exiting place mode
       e.stopPropagation();
 
-      // 터치 탭: ghostPos가 없으므로 클릭 지점에서 직접 계산
-      const info = ghostPos
-        ? { grid: ghostPos, collision: hasCollision, oob: outOfBounds }
-        : updateGhostFromPoint(e.point);
-      if (!info) return;
+      // 터치: 최종 위치로 충돌 재계산
+      const info = isTouch
+        ? updateGhostFromPoint(e.point)
+        : ghostPos
+          ? { grid: ghostPos, collision: hasCollision, oob: outOfBounds }
+          : updateGhostFromPoint(e.point);
+      if (!info) { finishTouchPlacing(); return; }
 
       if (info.collision) {
         showToast(info.oob ? '건축 영역 밖입니다' : '설치할 수 없는 위치입니다');
+        finishTouchPlacing();
         return;
       }
 
@@ -174,8 +213,14 @@ export function GhostModule({ parcelOffset = { x: 0, z: 0 }, buildablePolygon }:
         rotation: ghostRotation,
         floor: currentFloor,
       });
+
+      // 터치 배치 완료 → OrbitControls 복원 + 고스트 제거
+      if (isTouch) {
+        setGhostPos(null);
+      }
+      finishTouchPlacing();
     },
-    [activeTool, moduleDef, ghostPos, hasCollision, outOfBounds, currentFloor, addPlacement, ghostRotation, showToast, centerToCorner, updateGhostFromPoint],
+    [activeTool, moduleDef, ghostPos, hasCollision, outOfBounds, currentFloor, addPlacement, ghostRotation, showToast, centerToCorner, updateGhostFromPoint, finishTouchPlacing],
   );
 
   if (activeTool !== 'place' || !moduleDef) return null;
