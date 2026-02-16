@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { cn } from '@/lib/cn';
 import type { MapBounds } from '@/types/land';
 import type { AuctionProperty, AuctionFilters } from '@/types/auction';
-import { useAuctionProperties, useAuctionStore } from '@/features/auction';
+import { useAuctionProperties, useAuctionStore, DEFAULT_FILTERS } from '@/features/auction';
 import { useBuilderStore } from '@/features/builder/store';
 import { KakaoMap, getKakaoMapInstance } from '@/components/map/KakaoMap';
 import { AuctionOverlay } from '@/components/map/AuctionOverlay';
@@ -17,17 +17,6 @@ import { MapControls, type MapType } from '@/components/map/MapControls';
 const METRO_PREFIXES = ['서울', '경기', '인천'];
 
 const LOW_UNIT_PRICE_THRESHOLD = 10_000; // 1만원/m²
-
-const DEFAULT_FILTERS: AuctionFilters = {
-  priceRange: [0, Number.MAX_SAFE_INTEGER],
-  areaRange: [0, Number.MAX_SAFE_INTEGER],
-  disposalMethods: [],
-  landTypes: [],
-  region: 'all',
-  searchQuery: '',
-  dataSources: [],
-  excludeLowUnitPrice: true,
-};
 
 function hasActiveFilters(filters: AuctionFilters): boolean {
   return (
@@ -66,7 +55,8 @@ function MapPageInner() {
   const [bounds, setBounds] = useState<MapBounds | null>(null);
   const [zoomLevel, setZoomLevel] = useState(11);
   const [selectedAuctionId, setSelectedAuctionId] = useState<string | null>(null);
-  const [filters, setFilters] = useState<AuctionFilters>(DEFAULT_FILTERS);
+  const filters = useAuctionStore((s) => s.filters);
+  const setFilters = useAuctionStore((s) => s.setFilters);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const [listCollapsed, setListCollapsed] = useState(false);
   const [mapType, setMapType] = useState<MapType>('roadmap');
@@ -193,7 +183,7 @@ function MapPageInner() {
 
   const handleFiltersChange = useCallback((next: AuctionFilters) => {
     setFilters(next);
-  }, []);
+  }, [setFilters]);
 
   const activeFilters = hasActiveFilters(filters);
 

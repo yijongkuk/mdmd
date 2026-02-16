@@ -1,9 +1,20 @@
 import { create } from 'zustand';
-import type { AuctionProperty } from '@/types/auction';
+import type { AuctionProperty, AuctionFilters } from '@/types/auction';
 import type { LoadingProgress } from './hooks';
 
 const STORAGE_KEY = 'auction-cache';
 const STORAGE_TTL = 24 * 60 * 60 * 1000; // 24시간
+
+export const DEFAULT_FILTERS: AuctionFilters = {
+  priceRange: [0, Number.MAX_SAFE_INTEGER],
+  areaRange: [0, Number.MAX_SAFE_INTEGER],
+  disposalMethods: [],
+  landTypes: [],
+  region: 'all',
+  searchQuery: '',
+  dataSources: [],
+  excludeLowUnitPrice: true,
+};
 
 interface AuctionState {
   /** 수집된 매물 캐시 (id → property) */
@@ -20,6 +31,8 @@ interface AuctionState {
   apiError: string | null;
   /** retry 트리거 카운터 */
   retryCounter: number;
+  /** 필터 상태 (페이지 이동 후에도 유지) */
+  filters: AuctionFilters;
 
   /** 캐시에 매물 병합 (새 항목 또는 좌표 업데이트) */
   mergeResults: (properties: AuctionProperty[]) => void;
@@ -29,6 +42,8 @@ interface AuctionState {
   setProgress: (v: LoadingProgress | null) => void;
   setInitialFetchDone: (v: boolean) => void;
   setApiError: (v: string | null) => void;
+  /** 필터 상태 설정 */
+  setFilters: (v: AuctionFilters) => void;
   /** localStorage에 캐시 저장 */
   persistToStorage: () => void;
   /** localStorage에서 캐시 복원 — 성공 시 true */
@@ -48,6 +63,7 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
   progress: null,
   apiError: null,
   retryCounter: 0,
+  filters: { ...DEFAULT_FILTERS },
 
   mergeResults: (properties) => {
     const { cache } = get();
@@ -75,6 +91,7 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
   setProgress: (v) => set({ progress: v }),
   setInitialFetchDone: (v) => set({ initialFetchDone: v }),
   setApiError: (v) => set({ apiError: v }),
+  setFilters: (v) => set({ filters: v }),
 
   persistToStorage: () => {
     try {

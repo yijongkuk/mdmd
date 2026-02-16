@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
 import { X, RotateCcw, Search } from 'lucide-react';
 import type { AuctionProperty, AuctionFilters } from '@/types/auction';
+import { DEFAULT_FILTERS } from '@/features/auction';
 import { formatWon } from '@/lib/utils/format';
 import { Slider } from '@/components/ui/slider';
 import { Input } from '@/components/ui/input';
@@ -18,17 +19,6 @@ interface AuctionFilterPanelProps {
   viewportProperties: AuctionProperty[];
   filteredCount: number;
 }
-
-const DEFAULT_FILTERS: AuctionFilters = {
-  priceRange: [0, Number.MAX_SAFE_INTEGER],
-  areaRange: [0, Number.MAX_SAFE_INTEGER],
-  disposalMethods: [],
-  landTypes: [],
-  region: 'all',
-  searchQuery: '',
-  dataSources: [],
-  excludeLowUnitPrice: true,
-};
 
 function formatArea(m2: number): string {
   const pyeong = Math.round(m2 / 3.3058);
