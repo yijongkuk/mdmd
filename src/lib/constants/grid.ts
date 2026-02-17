@@ -19,8 +19,8 @@ export const DEFAULT_GRID_EXTENT = 100;
 /** Snap threshold in world units (meters) */
 export const SNAP_THRESHOLD = GRID_SIZE / 2;
 
-/** Rotation step in degrees (15° → 24 steps per full rotation) */
-export const ROTATION_STEP = 15;
+/** Rotation step in degrees (45° → 8 steps per full rotation) */
+export const ROTATION_STEP = 45;
 
 /** Parcel boundary color (orange) */
 export const PARCEL_BOUNDARY_COLOR = '#f97316';
