@@ -99,6 +99,7 @@ export default function BuilderPage() {
   const loadedRef = useRef(false);
   // DB에 이미 존재하는 프로젝트인지 (한 번이라도 저장된 적 있는지)
   const existsInDbRef = useRef(false);
+  const [existsInDb, setExistsInDb] = useState(false);
   // unmount/cleanup save 시 정확한 projectId를 참조하기 위한 ref
   const projectIdRef = useRef(projectId);
 
@@ -168,6 +169,7 @@ export default function BuilderPage() {
       });
       if (res.ok) {
         existsInDbRef.current = true;
+        setExistsInDb(true);
         setSaveStatus('saved');
         setLastSavedAt(new Date().toLocaleTimeString('ko-KR'));
         setTimeout(() => setSaveStatus('idle'), 2000);
@@ -184,6 +186,7 @@ export default function BuilderPage() {
     // 프로젝트 전환: 이전 데이터 즉시 클리어, autosave 차단
     loadedRef.current = false;
     existsInDbRef.current = false;
+    setExistsInDb(false);
     projectIdRef.current = projectId;
     setProjectId(projectId);
     loadPlacements([]);
@@ -201,6 +204,7 @@ export default function BuilderPage() {
         if (projectIdRef.current !== projectId) return;
         if (!data) { loadedRef.current = true; return; }
         existsInDbRef.current = true;
+        setExistsInDb(true);
 
         if (data.name) setProjectName(data.name);
         if (data.parcelPnu) setDbParcelPnu(data.parcelPnu);
@@ -399,7 +403,7 @@ export default function BuilderPage() {
           onOpenChange={handleRightSidebarChange}
         >
           <PropertyPanel
-            projectId={projectId}
+            projectId={existsInDb ? projectId : undefined}
             onSave={manualSave}
             saveStatus={saveStatus}
             lastSavedAt={lastSavedAt}
