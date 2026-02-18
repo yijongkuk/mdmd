@@ -260,28 +260,30 @@ export const AuctionOverlay = memo(function AuctionOverlay({
         );
 
         const isSelected = property.id === selectedIdRef.current;
-        const strokeColor = isSelected ? '#3b82f6' : '#ef4444';
-        const fillColor = isSelected ? '#3b82f6' : '#ef4444';
 
         // 대지경계: 실선 폴리곤
+        // 선택 시: 두꺼운 빨간 테두리 + 연한 노란색 채움 (프로젝트 파란색과 구분)
         const polygon = new kakao.maps.Polygon({
           path,
-          strokeWeight: isSelected ? 3 : 2,
-          strokeColor,
+          strokeWeight: isSelected ? 5 : 2,
+          strokeColor: '#ef4444',
           strokeOpacity: 1,
-          fillColor,
+          fillColor: isSelected ? '#fde047' : '#ef4444',
           fillOpacity: isSelected ? 0.3 : 0.15,
         });
         polygon.setMap(map);
 
         kakao.maps.event.addListener(polygon, 'click', () => onSelectRef.current(property.id));
         kakao.maps.event.addListener(polygon, 'mouseover', () => {
-          polygon.setOptions({ fillOpacity: isSelected ? 0.4 : 0.25, strokeWeight: 3 });
+          polygon.setOptions({
+            fillOpacity: isSelected ? 0.45 : 0.25,
+            strokeWeight: isSelected ? 5 : 3,
+          });
         });
         kakao.maps.event.addListener(polygon, 'mouseout', () => {
           polygon.setOptions({
             fillOpacity: isSelected ? 0.3 : 0.15,
-            strokeWeight: isSelected ? 3 : 2,
+            strokeWeight: isSelected ? 5 : 2,
           });
         });
 
@@ -451,7 +453,7 @@ export const AuctionOverlay = memo(function AuctionOverlay({
       idleRegisteredRef.current = true;
     }
 
-    // Draw for current view (re-runs when properties load or zoom changes)
+    // Draw for current view (re-runs when properties, zoom, or selection changes)
     refreshPolygons();
 
     return () => {
@@ -459,7 +461,7 @@ export const AuctionOverlay = memo(function AuctionOverlay({
       polygonsRef.current.forEach((p) => p.setMap(null));
       polygonsRef.current = [];
     };
-  }, [refreshPolygons, zoomLevel, properties]);
+  }, [refreshPolygons, zoomLevel, properties, selectedId]);
 
   // ─── MARKER HTML UPDATE: runs when properties or selectedId changes ───
   useEffect(() => {
