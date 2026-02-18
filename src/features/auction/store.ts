@@ -1,10 +1,14 @@
 import { create } from 'zustand';
 import type { AuctionProperty, AuctionFilters } from '@/types/auction';
 import type { LoadingProgress } from './hooks';
+import type { MapType } from '@/components/map/MapControls';
 
 const STORAGE_KEY = 'auction-cache';
 const FILTERS_KEY = 'auction-filters';
+const SOIL_CACHE_KEY = 'soil-difficulty-cache';
+const MAP_TYPE_KEY = 'map-type';
 const STORAGE_TTL = 24 * 60 * 60 * 1000; // 24시간
+const SOIL_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7일
 
 export const DEFAULT_FILTERS: AuctionFilters = {
   priceRange: [0, Number.MAX_SAFE_INTEGER],
@@ -15,7 +19,34 @@ export const DEFAULT_FILTERS: AuctionFilters = {
   searchQuery: '',
   dataSources: [],
   excludeLowUnitPrice: true,
+  excludeDifficultSoil: false,
 };
+
+type SoilDifficulty = 'good' | 'moderate' | 'difficult';
+
+/** localStorage에서 토양 캐시 복원 */
+function loadPersistedSoilCache(): Record<string, SoilDifficulty> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(SOIL_CACHE_KEY);
+    if (raw) {
+      const { timestamp, data } = JSON.parse(raw) as { timestamp: number; data: Record<string, SoilDifficulty> };
+      if (Date.now() - timestamp < SOIL_CACHE_TTL) return data;
+      localStorage.removeItem(SOIL_CACHE_KEY);
+    }
+  } catch { /* ignore */ }
+  return {};
+}
+
+/** localStorage에서 지도유형 복원 */
+function loadPersistedMapType(): MapType {
+  if (typeof window === 'undefined') return 'roadmap';
+  try {
+    const raw = localStorage.getItem(MAP_TYPE_KEY);
+    if (raw === 'roadmap' || raw === 'skyview' || raw === 'hybrid') return raw;
+  } catch { /* ignore */ }
+  return 'roadmap';
+}
 
 /** localStorage에서 필터 복원 — 초기화 전까지 유지 */
 function loadPersistedFilters(): AuctionFilters {
@@ -47,6 +78,10 @@ interface AuctionState {
   retryCounter: number;
   /** 필터 상태 (페이지 이동 후에도 유지) */
   filters: AuctionFilters;
+  /** 토양 난이도 캐시 (PNU → difficulty) */
+  soilDifficultyMap: Record<string, SoilDifficulty>;
+  /** 지도 유형 (페이지 이동 후에도 유지) */
+  mapType: MapType;
 
   /** 캐시에 매물 병합 (새 항목 또는 좌표 업데이트) */
   mergeResults: (properties: AuctionProperty[]) => void;
@@ -58,6 +93,10 @@ interface AuctionState {
   setApiError: (v: string | null) => void;
   /** 필터 상태 설정 */
   setFilters: (v: AuctionFilters) => void;
+  /** 토양 난이도 캐시 업데이트 */
+  setSoilDifficulty: (pnu: string, level: SoilDifficulty) => void;
+  /** 지도 유형 설정 */
+  setMapType: (type: MapType) => void;
   /** localStorage에 캐시 저장 */
   persistToStorage: () => void;
   /** localStorage에서 캐시 복원 — 성공 시 true */
@@ -78,6 +117,8 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
   apiError: null,
   retryCounter: 0,
   filters: loadPersistedFilters(),
+  soilDifficultyMap: loadPersistedSoilCache(),
+  mapType: loadPersistedMapType(),
 
   mergeResults: (properties) => {
     const { cache } = get();
@@ -108,6 +149,17 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
   setFilters: (v) => {
     set({ filters: v });
     try { localStorage.setItem(FILTERS_KEY, JSON.stringify(v)); } catch { /* ignore */ }
+  },
+  setSoilDifficulty: (pnu, level) => {
+    const map = { ...get().soilDifficultyMap, [pnu]: level };
+    set({ soilDifficultyMap: map });
+    try {
+      localStorage.setItem(SOIL_CACHE_KEY, JSON.stringify({ timestamp: Date.now(), data: map }));
+    } catch { /* ignore */ }
+  },
+  setMapType: (type) => {
+    set({ mapType: type });
+    try { localStorage.setItem(MAP_TYPE_KEY, type); } catch { /* ignore */ }
   },
 
   persistToStorage: () => {

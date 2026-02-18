@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useSyncExternalStore } from 'react';
 import { Plus, Minus, Locate, Layers, SlidersHorizontal } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
@@ -17,6 +17,10 @@ interface MapControlsProps {
   onMapTypeChange: (type: MapType) => void;
   className?: string;
 }
+
+const subscribe = () => () => {};
+const getSnapshot = () => true;
+const getServerSnapshot = () => false;
 
 const MAP_TYPE_OPTIONS: { value: MapType; label: string }[] = [
   { value: 'roadmap', label: '일반지도' },
@@ -35,6 +39,7 @@ export function MapControls({
   onMapTypeChange,
   className,
 }: MapControlsProps) {
+  const isMounted = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const [layerOpen, setLayerOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -96,7 +101,7 @@ export function MapControls({
           onClick={onToggleFilter}
           active={filterOpen}
         />
-        {hasActiveFilters && (
+        {isMounted && hasActiveFilters && (
           <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-red-500 border-2 border-white" />
         )}
       </div>

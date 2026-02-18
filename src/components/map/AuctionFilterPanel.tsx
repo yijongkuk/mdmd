@@ -562,6 +562,22 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
           </div>
         )}
 
+        {/* Soil difficulty filter */}
+        <div>
+          <label className="text-xs font-medium text-slate-500 mb-1.5 block">
+            토양 정보
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-slate-50">
+            <input
+              type="checkbox"
+              checked={filters.excludeDifficultSoil}
+              onChange={() => onFiltersChange({ ...filters, excludeDifficultSoil: !filters.excludeDifficultSoil })}
+              className="h-3.5 w-3.5 rounded border-slate-300 text-red-500 focus:ring-red-500"
+            />
+            <span className="text-xs text-slate-700">기초공사 어려움 제외</span>
+          </label>
+        </div>
+
       </div>
     </div>
   );

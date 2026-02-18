@@ -2,8 +2,9 @@
 
 import { useState, useEffect, memo } from 'react';
 import { useRouter } from 'next/navigation';
-import { X, ExternalLink, MapPin, Calendar, Tag, Gavel, ArrowRight, Ruler, Banknote, Map, School } from 'lucide-react';
+import { X, ExternalLink, MapPin, Calendar, Tag, Gavel, ArrowRight, Ruler, Banknote, Map, School, Layers } from 'lucide-react';
 import type { AuctionProperty } from '@/types/auction';
+import type { SoilInfo } from '@/types/soil';
 import { formatWon, formatDate, formatArea, formatPyeong } from '@/lib/utils/format';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -27,6 +28,8 @@ export const AuctionInfoPanel = memo(function AuctionInfoPanel({ property, onClo
   const router = useRouter();
   const [landDetail, setLandDetail] = useState<LandDetail | null>(null);
   const [landLoading, setLandLoading] = useState(false);
+  const [soilInfo, setSoilInfo] = useState<SoilInfo | null>(null);
+  const [soilLoading, setSoilLoading] = useState(false);
 
   // Fetch V-World land detail when property changes
   useEffect(() => {
@@ -51,6 +54,26 @@ export const AuctionInfoPanel = memo(function AuctionInfoPanel({ property, onClo
       });
     return () => { cancelled = true; };
   }, [property?.id, property?.lat, property?.lng]);
+
+  // Fetch soil info when PNU is available
+  useEffect(() => {
+    setSoilInfo(null);
+    const pnu = landDetail?.pnu;
+    if (!pnu || pnu.length < 19) return;
+
+    let cancelled = false;
+    setSoilLoading(true);
+    fetch(`/api/land/soil?pnu=${pnu}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!cancelled) setSoilInfo(data);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setSoilLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [landDetail?.pnu]);
 
   if (!property) return null;
 
@@ -295,6 +318,116 @@ export const AuctionInfoPanel = memo(function AuctionInfoPanel({ property, onClo
               </p>
             )}
           </div>
+
+          {/* Soil Info */}
+          {landDetail?.pnu && (
+            <div className="rounded-lg border border-slate-100 bg-amber-50/40 p-3">
+              <div className="flex items-center gap-2 mb-2.5">
+                <Layers className="h-4 w-4 text-amber-600" />
+                <p className="text-xs font-semibold text-slate-700">토양 정보</p>
+                {soilInfo?.difficultyLevel && (
+                  <span className={cn(
+                    'ml-auto text-[11px] font-medium px-1.5 py-0.5 rounded',
+                    soilInfo.difficultyLevel === 'good' && 'bg-green-100 text-green-700',
+                    soilInfo.difficultyLevel === 'moderate' && 'bg-yellow-100 text-yellow-700',
+                    soilInfo.difficultyLevel === 'difficult' && 'bg-red-100 text-red-700',
+                  )}>
+                    기초공사 {soilInfo.difficultyLabel}
+                  </span>
+                )}
+              </div>
+              {soilLoading ? (
+                <div className="flex items-center gap-2 py-2">
+                  <div className="h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-amber-600" />
+                  <span className="text-xs text-slate-500">토양 정보 조회 중...</span>
+                </div>
+              ) : soilInfo?.characteristics ? (
+                <div className="space-y-2.5">
+                  {/* 표토/심토 비교 */}
+                  {(soilInfo.characteristics.soilTextureName || soilInfo.profile?.deepSoilTextureName ||
+                    soilInfo.characteristics.surfaceGravelName || soilInfo.profile?.deepSoilGravelName) && (
+                    <div>
+                      <p className="text-[10px] text-slate-400 mb-1.5">표토 / 심토 비교</p>
+                      <div className="space-y-1">
+                        {(soilInfo.characteristics.soilTextureName || soilInfo.profile?.deepSoilTextureName) && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] text-slate-500">토성</span>
+                            <span className="text-xs font-medium text-slate-700">
+                              {soilInfo.characteristics.soilTextureName ?? '-'} / {soilInfo.profile?.deepSoilTextureName ?? '-'}
+                            </span>
+                          </div>
+                        )}
+                        {(soilInfo.characteristics.surfaceGravelName || soilInfo.profile?.deepSoilGravelName) && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] text-slate-500">자갈함량</span>
+                            <span className="text-xs font-medium text-slate-700">
+                              {soilInfo.characteristics.surfaceGravelName ?? '-'} / {soilInfo.profile?.deepSoilGravelName ?? '-'}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {/* 지반 특성 */}
+                  <div className="pt-1.5 border-t border-amber-100/60">
+                    <p className="text-[10px] text-slate-400 mb-1.5">지반 특성</p>
+                    <div className="space-y-1">
+                      {soilInfo.characteristics.soilDepthName && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] text-slate-500">유효토심</span>
+                          <span className="text-xs font-medium text-slate-700">{soilInfo.characteristics.soilDepthName}</span>
+                        </div>
+                      )}
+                      {soilInfo.characteristics.parentRockName && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] text-slate-500">모암</span>
+                          <span className="text-xs font-medium text-slate-700">{soilInfo.characteristics.parentRockName}</span>
+                        </div>
+                      )}
+                      {soilInfo.characteristics.drainageName && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] text-slate-500">배수등급</span>
+                          <span className="text-xs font-medium text-slate-700">{soilInfo.characteristics.drainageName}</span>
+                        </div>
+                      )}
+                      {soilInfo.characteristics.structureName && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] text-slate-500">토양구조</span>
+                          <span className="text-xs font-medium text-slate-700">{soilInfo.characteristics.structureName}</span>
+                        </div>
+                      )}
+                      {soilInfo.profile?.slopeName && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] text-slate-500">경사도</span>
+                          <span className="text-xs font-medium text-slate-700">{soilInfo.profile.slopeName}</span>
+                        </div>
+                      )}
+                      {soilInfo.characteristics.erosionName && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] text-slate-500">침식등급</span>
+                          <span className="text-xs font-medium text-slate-700">{soilInfo.characteristics.erosionName}</span>
+                        </div>
+                      )}
+                      {soilInfo.characteristics.terrainName && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] text-slate-500">분포지형</span>
+                          <span className="text-xs font-medium text-slate-700">{soilInfo.characteristics.terrainName}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : soilInfo ? (
+                <p className="text-xs text-slate-400 py-1">
+                  이 필지의 토양 정보가 없습니다
+                </p>
+              ) : (
+                <p className="text-xs text-slate-400 py-1">
+                  토양 정보를 조회할 수 없습니다
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </ScrollArea>
 

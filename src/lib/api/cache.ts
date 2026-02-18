@@ -26,6 +26,7 @@ export const TTL = {
   AUCTION: 4 * 60 * 60 * 1000, // 4시간 (OnBid API 응답 18~25초 소요)
   ELEVATION: 7 * 24 * 60 * 60 * 1000, // 7일 (지형 변경 없음)
   SURROUNDING: 24 * 60 * 60 * 1000, // 24시간 (건물/도로 변경 없음)
+  SOIL: 7 * 24 * 60 * 60 * 1000, // 7일 (토양 정보 변경 없음)
 };
 
 /** Clear all cached auction data (forces re-fetch from OnBid) */

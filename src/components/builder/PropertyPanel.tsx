@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { RotateCw, Trash2, Box, Layers, Save, Check, Loader2, AlertCircle, Pencil, Upload } from 'lucide-react';
+import { RotateCw, Trash2, Box, Layers, Save, Check, Loader2, AlertCircle, Pencil, Upload, Mountain } from 'lucide-react';
 import { SpeckleExportDialog } from './SpeckleExportDialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -14,6 +14,8 @@ import { MODULE_CATEGORY_LABELS } from '@/types/builder';
 import { FLOOR_LABELS } from '@/lib/constants/grid';
 import { formatWon } from '@/lib/utils/format';
 import { MaterialPicker } from './MaterialPicker';
+import { cn } from '@/lib/cn';
+import type { SoilInfo } from '@/types/soil';
 
 function FloorAreaTable() {
   const floorAreas = useBuilderStore((s) => s.floorAreas);
@@ -67,12 +69,35 @@ interface ProjectSummaryProps {
   saveStatus?: 'idle' | 'saving' | 'saved' | 'error';
   lastSavedAt?: string | null;
   onRename?: (name: string) => void;
+  parcelPnu?: string | null;
 }
 
-function ProjectSummary({ onSave, saveStatus = 'idle', lastSavedAt, onRename }: ProjectSummaryProps) {
+function ProjectSummary({ onSave, saveStatus = 'idle', lastSavedAt, onRename, parcelPnu }: ProjectSummaryProps) {
   const placements = useBuilderStore((s) => s.placements);
   const projectName = useBuilderStore((s) => s.projectName);
   const setProjectName = useBuilderStore((s) => s.setProjectName);
+
+  // Soil info fetch
+  const [soilInfo, setSoilInfo] = useState<SoilInfo | null>(null);
+  const [soilLoading, setSoilLoading] = useState(false);
+
+  useEffect(() => {
+    setSoilInfo(null);
+    if (!parcelPnu || parcelPnu.length < 19) return;
+
+    let cancelled = false;
+    setSoilLoading(true);
+    fetch(`/api/land/soil?pnu=${parcelPnu}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!cancelled) setSoilInfo(data);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setSoilLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [parcelPnu]);
 
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(projectName);
@@ -200,6 +225,123 @@ function ProjectSummary({ onSave, saveStatus = 'idle', lastSavedAt, onRename }: 
       {/* 층별 건축가능 면적 테이블 */}
       <Separator />
       <FloorAreaTable />
+
+      {/* 토양 정보 */}
+      {parcelPnu && parcelPnu.length >= 19 && (
+        <>
+          <Separator />
+          <div className="space-y-2.5">
+            <div className="flex items-center gap-1.5">
+              <Mountain className="h-3.5 w-3.5 text-amber-500" />
+              <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                토양 정보
+              </h3>
+              {soilInfo?.difficultyLevel && (
+                <span className={cn(
+                  'ml-auto text-[11px] font-medium px-1.5 py-0.5 rounded',
+                  soilInfo.difficultyLevel === 'good' && 'bg-green-100 text-green-700',
+                  soilInfo.difficultyLevel === 'moderate' && 'bg-yellow-100 text-yellow-700',
+                  soilInfo.difficultyLevel === 'difficult' && 'bg-red-100 text-red-700',
+                )}>
+                  기초공사 {soilInfo.difficultyLabel}
+                </span>
+              )}
+            </div>
+            <div className="rounded-lg border border-slate-100 bg-amber-50/40 p-3">
+              {soilLoading ? (
+                <div className="flex items-center gap-2 py-2">
+                  <div className="h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-amber-600" />
+                  <span className="text-xs text-slate-500">토양 정보 조회 중...</span>
+                </div>
+              ) : soilInfo?.characteristics ? (
+                <div className="space-y-2.5">
+                  {/* 표토/심토 비교 */}
+                  {(soilInfo.characteristics.soilTextureName || soilInfo.profile?.deepSoilTextureName ||
+                    soilInfo.characteristics.surfaceGravelName || soilInfo.profile?.deepSoilGravelName) && (
+                    <div>
+                      <p className="text-[10px] text-slate-400 mb-1.5">표토 / 심토 비교</p>
+                      <div className="space-y-1">
+                        {(soilInfo.characteristics.soilTextureName || soilInfo.profile?.deepSoilTextureName) && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] text-slate-500">토성</span>
+                            <span className="text-xs font-medium text-slate-700">
+                              {soilInfo.characteristics.soilTextureName ?? '-'} / {soilInfo.profile?.deepSoilTextureName ?? '-'}
+                            </span>
+                          </div>
+                        )}
+                        {(soilInfo.characteristics.surfaceGravelName || soilInfo.profile?.deepSoilGravelName) && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] text-slate-500">자갈함량</span>
+                            <span className="text-xs font-medium text-slate-700">
+                              {soilInfo.characteristics.surfaceGravelName ?? '-'} / {soilInfo.profile?.deepSoilGravelName ?? '-'}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {/* 지반 특성 */}
+                  <div className="pt-1.5 border-t border-amber-100/60">
+                    <p className="text-[10px] text-slate-400 mb-1.5">지반 특성</p>
+                    <div className="space-y-1">
+                      {soilInfo.characteristics.soilDepthName && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] text-slate-500">유효토심</span>
+                          <span className="text-xs font-medium text-slate-700">{soilInfo.characteristics.soilDepthName}</span>
+                        </div>
+                      )}
+                      {soilInfo.characteristics.parentRockName && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] text-slate-500">모암</span>
+                          <span className="text-xs font-medium text-slate-700">{soilInfo.characteristics.parentRockName}</span>
+                        </div>
+                      )}
+                      {soilInfo.characteristics.drainageName && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] text-slate-500">배수등급</span>
+                          <span className="text-xs font-medium text-slate-700">{soilInfo.characteristics.drainageName}</span>
+                        </div>
+                      )}
+                      {soilInfo.characteristics.structureName && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] text-slate-500">토양구조</span>
+                          <span className="text-xs font-medium text-slate-700">{soilInfo.characteristics.structureName}</span>
+                        </div>
+                      )}
+                      {soilInfo.profile?.slopeName && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] text-slate-500">경사도</span>
+                          <span className="text-xs font-medium text-slate-700">{soilInfo.profile.slopeName}</span>
+                        </div>
+                      )}
+                      {soilInfo.characteristics.erosionName && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] text-slate-500">침식등급</span>
+                          <span className="text-xs font-medium text-slate-700">{soilInfo.characteristics.erosionName}</span>
+                        </div>
+                      )}
+                      {soilInfo.characteristics.terrainName && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] text-slate-500">분포지형</span>
+                          <span className="text-xs font-medium text-slate-700">{soilInfo.characteristics.terrainName}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : soilInfo ? (
+                <p className="text-xs text-slate-400 py-1">
+                  이 필지의 토양 정보가 없습니다
+                </p>
+              ) : (
+                <p className="text-xs text-slate-400 py-1">
+                  토양 정보를 조회할 수 없습니다
+                </p>
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
       {totalModules === 0 && (
         <div className="rounded-lg border border-dashed border-slate-300 py-8 text-center">
@@ -364,9 +506,10 @@ interface PropertyPanelProps {
   saveStatus?: 'idle' | 'saving' | 'saved' | 'error';
   lastSavedAt?: string | null;
   onRename?: (name: string) => void;
+  parcelPnu?: string | null;
 }
 
-export function PropertyPanel({ onSave, saveStatus, lastSavedAt, onRename }: PropertyPanelProps) {
+export function PropertyPanel({ onSave, saveStatus, lastSavedAt, onRename, parcelPnu }: PropertyPanelProps) {
   const selectedPlacementIds = useBuilderStore((s) => s.selectedPlacementIds);
   const placements = useBuilderStore((s) => s.placements);
   const hasSelection = selectedPlacementIds.length > 0;
@@ -397,7 +540,7 @@ export function PropertyPanel({ onSave, saveStatus, lastSavedAt, onRename }: Pro
         {hasSelection ? (
           <SelectedModulePanel />
         ) : (
-          <ProjectSummary onSave={onSave} saveStatus={saveStatus} lastSavedAt={lastSavedAt} onRename={onRename} />
+          <ProjectSummary onSave={onSave} saveStatus={saveStatus} lastSavedAt={lastSavedAt} onRename={onRename} parcelPnu={parcelPnu} />
         )}
       </ScrollArea>
       {/* Sticky export button at bottom */}

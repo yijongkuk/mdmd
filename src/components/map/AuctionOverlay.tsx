@@ -340,6 +340,7 @@ export const AuctionOverlay = memo(function AuctionOverlay({
           content: el,
           yAnchor: 0.5,
           xAnchor: 0.5,
+          zIndex: 10,
         });
         ov.setMap(map);
         overlaysRef.current.push(ov);

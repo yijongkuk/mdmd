@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState, useCallback, useMemo } from 'react';
+import { Suspense, useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { cn } from '@/lib/cn';
 import type { MapBounds } from '@/types/land';
@@ -9,10 +9,12 @@ import { useAuctionProperties, useAuctionStore, DEFAULT_FILTERS } from '@/featur
 import { useBuilderStore } from '@/features/builder/store';
 import { KakaoMap, getKakaoMapInstance } from '@/components/map/KakaoMap';
 import { AuctionOverlay } from '@/components/map/AuctionOverlay';
+import { ProjectOverlay } from '@/components/map/ProjectOverlay';
 import { AuctionInfoPanel } from '@/components/map/AuctionInfoPanel';
 import { AuctionBottomList } from '@/components/map/AuctionBottomList';
 import { AuctionFilterPanel } from '@/components/map/AuctionFilterPanel';
 import { MapControls, type MapType } from '@/components/map/MapControls';
+import type { SoilInfo } from '@/types/soil';
 
 const METRO_PREFIXES = ['서울', '경기', '인천'];
 
@@ -29,7 +31,8 @@ function hasActiveFilters(filters: AuctionFilters): boolean {
     filters.region !== 'all' ||
     filters.searchQuery !== '' ||
     filters.dataSources.length > 0 ||
-    filters.excludeLowUnitPrice !== true
+    filters.excludeLowUnitPrice !== true ||
+    filters.excludeDifficultSoil === true
   );
 }
 
@@ -57,9 +60,12 @@ function MapPageInner() {
   const [selectedAuctionId, setSelectedAuctionId] = useState<string | null>(null);
   const filters = useAuctionStore((s) => s.filters);
   const setFilters = useAuctionStore((s) => s.setFilters);
+  const soilDifficultyMap = useAuctionStore((s) => s.soilDifficultyMap);
+  const setSoilDifficulty = useAuctionStore((s) => s.setSoilDifficulty);
+  const mapType = useAuctionStore((s) => s.mapType);
+  const setMapTypeStore = useAuctionStore((s) => s.setMapType);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const [listCollapsed, setListCollapsed] = useState(false);
-  const [mapType, setMapType] = useState<MapType>('roadmap');
 
   // OnBid 매각/임대 물건 — 실제 공매·매각·임대 유휴지만 표시
   const { properties: auctionProperties, isLoading: auctionsLoading, loadingRegion, progress, apiError, retry } =
@@ -76,6 +82,8 @@ function MapPageInner() {
       // 면적 없거나 공시지가 없는데 감정가 100만원 미만 → 비정상
       if (!p.officialLandPrice && p.appraisalValue < 1_000_000) return false;
     }
+    // 토양 난이도 필터 — PNU 없거나 미조회는 통과
+    if (filters.excludeDifficultSoil && p.pnu && soilDifficultyMap[p.pnu] === 'difficult') return false;
     // 데이터 소스 필터
     if (filters.dataSources.length > 0 && !filters.dataSources.includes(p.source ?? 'onbid')) return false;
     // 감정가액 기준 필터
@@ -95,7 +103,7 @@ function MapPageInner() {
       if (!p.name.toLowerCase().includes(q) && !p.address.toLowerCase().includes(q)) return false;
     }
     return true;
-  }, [filters]);
+  }, [filters, soilDifficultyMap]);
 
   // 뷰포트 내 좌표 있는 물건 (필터 미적용) — 필터 패널 카운트용
   const viewportProperties = useMemo(() => {
@@ -124,13 +132,81 @@ function MapPageInner() {
     ));
   }, [auctionProperties, applyFilters, bounds]);
 
+  // 배치 토양 조회 — excludeDifficultSoil ON일 때만
+  const soilAbortRef = useRef<AbortController | null>(null);
+
+  // PNU 목록 (필터 무관, 뷰포트 내) — 토양 조회 대상
+  const viewportPnus = useMemo(() => {
+    const pnus = new Set<string>();
+    for (const p of viewportProperties) {
+      if (p.pnu) pnus.add(p.pnu);
+    }
+    return pnus;
+  }, [viewportProperties]);
+
+  useEffect(() => {
+    if (!filters.excludeDifficultSoil) {
+      soilAbortRef.current?.abort();
+      soilAbortRef.current = null;
+      return;
+    }
+
+    const allPnus = [...viewportPnus];
+    const unchecked = allPnus.filter((pnu) => !soilDifficultyMap[pnu]);
+    if (unchecked.length === 0) return;
+
+    const controller = new AbortController();
+    soilAbortRef.current?.abort();
+    soilAbortRef.current = controller;
+
+    (async () => {
+      // 동시 3건씩
+      for (let i = 0; i < unchecked.length; i += 3) {
+        if (controller.signal.aborted) break;
+        const batch = unchecked.slice(i, i + 3);
+        const results = await Promise.allSettled(
+          batch.map((pnu) =>
+            fetch(`/api/land/soil?pnu=${pnu}`, { signal: controller.signal })
+              .then((r) => r.json() as Promise<SoilInfo>)
+              .then((info) => ({ pnu, level: info.difficultyLevel }))
+          ),
+        );
+        if (controller.signal.aborted) break;
+        for (const r of results) {
+          if (r.status === 'fulfilled' && r.value.level) {
+            setSoilDifficulty(r.value.pnu, r.value.level);
+          }
+        }
+      }
+    })();
+
+    return () => { controller.abort(); };
+    // soilDifficultyMap 제외 — 조회 결과가 map을 업데이트하면 재트리거 방지
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.excludeDifficultSoil, viewportPnus, setSoilDifficulty]);
+
   const selectedAuction = useMemo<AuctionProperty | null>(() => {
     if (!selectedAuctionId) return null;
     return auctionProperties.find((p) => p.id === selectedAuctionId) ?? null;
   }, [selectedAuctionId, auctionProperties]);
 
+  // 지도 준비 후 persist된 mapType 복원 (1회)
+  const mapTypeRestoredRef = useRef(false);
   const handleBoundsChange = useCallback((b: MapBounds) => {
     setBounds(b);
+    // 첫 bounds 콜백 = 지도 SDK 준비 완료
+    if (!mapTypeRestoredRef.current) {
+      mapTypeRestoredRef.current = true;
+      const stored = useAuctionStore.getState().mapType;
+      if (stored !== 'roadmap') {
+        const map = getKakaoMapInstance();
+        if (map && window.kakao?.maps) {
+          const { MapTypeId } = window.kakao.maps;
+          const typeMap = { roadmap: MapTypeId.ROADMAP, skyview: MapTypeId.SKYVIEW, hybrid: MapTypeId.HYBRID };
+          map.setMapTypeId(typeMap[stored]);
+        }
+      }
+    }
   }, []);
 
   const handleZoomChange = useCallback((level: number) => {
@@ -172,14 +248,14 @@ function MapPageInner() {
   }, []);
 
   const handleMapTypeChange = useCallback((type: MapType) => {
-    setMapType(type);
+    setMapTypeStore(type);
     const map = getKakaoMapInstance();
     if (map && window.kakao?.maps) {
       const { MapTypeId } = window.kakao.maps;
       const typeMap = { roadmap: MapTypeId.ROADMAP, skyview: MapTypeId.SKYVIEW, hybrid: MapTypeId.HYBRID };
       map.setMapTypeId(typeMap[type]);
     }
-  }, []);
+  }, [setMapTypeStore]);
 
   const handleFiltersChange = useCallback((next: AuctionFilters) => {
     setFilters(next);
@@ -325,6 +401,9 @@ function MapPageInner() {
         onSelect={handleSelectAuction}
         zoomLevel={zoomLevel}
       />
+
+      {/* Project overlay — 내 프로젝트 파란 핀 + 필지 채움 */}
+      <ProjectOverlay zoomLevel={zoomLevel} />
 
       {/* Bottom list */}
       <AuctionBottomList

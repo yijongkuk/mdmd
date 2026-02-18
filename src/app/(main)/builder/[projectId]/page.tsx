@@ -403,6 +403,7 @@ export default function BuilderPage() {
             saveStatus={saveStatus}
             lastSavedAt={lastSavedAt}
             onRename={handleRename}
+            parcelPnu={effectivePnu}
           />
         </Sidebar>
       </div>
