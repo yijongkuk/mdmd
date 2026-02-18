@@ -205,6 +205,36 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
     return { min, max, step, withArea: areas.length };
   }, [allProperties]);
 
+  // Reconstruct preset selections from persisted filter values when data first loads
+  const pricePresetsInitRef = useRef(false);
+  const areaPresetsInitRef = useRef(false);
+  useEffect(() => {
+    if (pricePresetsInitRef.current || !priceStats) return;
+    pricePresetsInitRef.current = true;
+    const [lo, hi] = filtersRef.current.priceRange;
+    if (lo !== 0 || hi < Number.MAX_SAFE_INTEGER) {
+      const presets = buildPricePresets(priceStats.max);
+      const active = new Set<string>();
+      for (const p of presets) {
+        if (p.range[0] >= lo && p.range[1] <= hi) active.add(p.label);
+      }
+      if (active.size > 0) setSelectedPricePresets(active);
+    }
+  }, [priceStats]);
+  useEffect(() => {
+    if (areaPresetsInitRef.current || !areaStats) return;
+    areaPresetsInitRef.current = true;
+    const [lo, hi] = filtersRef.current.areaRange;
+    if (lo !== 0 || hi < Number.MAX_SAFE_INTEGER) {
+      const presets = buildAreaPresets(areaStats.max);
+      const active = new Set<string>();
+      for (const p of presets) {
+        if (p.range[0] >= lo && p.range[1] <= hi) active.add(p.label);
+      }
+      if (active.size > 0) setSelectedAreaPresets(active);
+    }
+  }, [areaStats]);
+
   const handleReset = () => {
     setSearchInput('');
     setLocalPriceRange([0, Number.MAX_SAFE_INTEGER]);

@@ -3,6 +3,7 @@ import type { AuctionProperty, AuctionFilters } from '@/types/auction';
 import type { LoadingProgress } from './hooks';
 
 const STORAGE_KEY = 'auction-cache';
+const FILTERS_KEY = 'auction-filters';
 const STORAGE_TTL = 24 * 60 * 60 * 1000; // 24시간
 
 export const DEFAULT_FILTERS: AuctionFilters = {
@@ -15,6 +16,19 @@ export const DEFAULT_FILTERS: AuctionFilters = {
   dataSources: [],
   excludeLowUnitPrice: true,
 };
+
+/** localStorage에서 필터 복원 — 초기화 전까지 유지 */
+function loadPersistedFilters(): AuctionFilters {
+  if (typeof window === 'undefined') return { ...DEFAULT_FILTERS };
+  try {
+    const raw = localStorage.getItem(FILTERS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<AuctionFilters>;
+      return { ...DEFAULT_FILTERS, ...parsed };
+    }
+  } catch { /* ignore */ }
+  return { ...DEFAULT_FILTERS };
+}
 
 interface AuctionState {
   /** 수집된 매물 캐시 (id → property) */
@@ -63,7 +77,7 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
   progress: null,
   apiError: null,
   retryCounter: 0,
-  filters: { ...DEFAULT_FILTERS },
+  filters: loadPersistedFilters(),
 
   mergeResults: (properties) => {
     const { cache } = get();
@@ -91,7 +105,10 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
   setProgress: (v) => set({ progress: v }),
   setInitialFetchDone: (v) => set({ initialFetchDone: v }),
   setApiError: (v) => set({ apiError: v }),
-  setFilters: (v) => set({ filters: v }),
+  setFilters: (v) => {
+    set({ filters: v });
+    try { localStorage.setItem(FILTERS_KEY, JSON.stringify(v)); } catch { /* ignore */ }
+  },
 
   persistToStorage: () => {
     try {
