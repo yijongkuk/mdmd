@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { RotateCw, Trash2, Box, Layers, Save, Check, Loader2, AlertCircle, Pencil, Mountain } from 'lucide-react';
+import { Trash2, Box, Layers, Save, Check, Loader2, AlertCircle, Pencil, Mountain } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -325,9 +325,6 @@ function ProjectSummary({ onRename, parcelPnu }: ProjectSummaryProps) {
 function SelectedModulePanel() {
   const selectedPlacementIds = useBuilderStore((s) => s.selectedPlacementIds);
   const placements = useBuilderStore((s) => s.placements);
-  const rotatePlacement = useBuilderStore((s) => s.rotatePlacement);
-  const removePlacement = useBuilderStore((s) => s.removePlacement);
-  const selectPlacement = useBuilderStore((s) => s.selectPlacement);
 
   // Show first selected module's details
   const placement = placements.find((p) => p.id === selectedPlacementIds[0]);
@@ -400,21 +397,10 @@ function SelectedModulePanel() {
 
       <Separator />
 
-      {/* Rotation */}
-      <div className="space-y-2">
-        <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wider">회전</h3>
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-slate-600">{placement.rotation}°</span>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => rotatePlacement(placement.id)}
-            className="h-8"
-          >
-            <RotateCw className="mr-1.5 h-3.5 w-3.5" />
-            15° 회전
-          </Button>
-        </div>
+      {/* Rotation (read-only display) */}
+      <div className="flex justify-between text-sm">
+        <span className="text-slate-500">회전</span>
+        <span className="font-medium">{placement.rotation}°</span>
       </div>
 
       <Separator />
@@ -446,21 +432,6 @@ function SelectedModulePanel() {
         </div>
       </div>
 
-      <Separator />
-
-      {/* Delete */}
-      <Button
-        variant="destructive"
-        size="sm"
-        className="w-full"
-        onClick={() => {
-          selectedPlacementIds.forEach((id) => removePlacement(id));
-          selectPlacement(null);
-        }}
-      >
-        <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-        {selectedPlacementIds.length > 1 ? `${selectedPlacementIds.length}개 모듈 삭제` : '모듈 삭제'}
-      </Button>
     </div>
   );
 }

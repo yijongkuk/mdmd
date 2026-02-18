@@ -57,9 +57,11 @@ interface BuilderStore {
 
   addPlacement: (placement: Omit<ModulePlacement, 'id'>) => void;
   removePlacement: (id: string) => void;
+  removePlacements: (ids: string[]) => void;
   movePlacement: (id: string, gridX: number, gridY: number, gridZ: number) => void;
   movePlacements: (moves: Array<{ id: string; gridX: number; gridZ: number }>) => void;
   rotatePlacement: (id: string, direction?: 1 | -1) => void;
+  rotatePlacements: (ids: string[], direction?: 1 | -1) => void;
   updatePlacementMaterial: (id: string, materialId: string, customColor?: string) => void;
   startDrag: (id: string, offsetX: number, offsetZ: number) => void;
   endDrag: () => void;
@@ -197,6 +199,17 @@ export const useBuilderStore = create<BuilderStore>((set) => ({
       redoStack: [],
     })),
 
+  removePlacements: (ids) =>
+    set((state) => {
+      const idSet = new Set(ids);
+      return {
+        placements: state.placements.filter((p) => !idSet.has(p.id)),
+        selectedPlacementIds: state.selectedPlacementIds.filter((sid) => !idSet.has(sid)),
+        undoStack: pushUndo(state.undoStack, state.placements),
+        redoStack: [],
+      };
+    }),
+
   movePlacement: (id, gridX, gridY, gridZ) =>
     set((state) => ({
       placements: state.placements.map((p) =>
@@ -252,6 +265,38 @@ export const useBuilderStore = create<BuilderStore>((set) => ({
             ? { ...pl, rotation: newRot, gridX: newGridX, gridZ: newGridZ }
             : pl,
         ),
+        undoStack: pushUndo(state.undoStack, state.placements),
+        redoStack: [],
+      };
+    }),
+
+  rotatePlacements: (ids, direction = 1) =>
+    set((state) => {
+      const idSet = new Set(ids);
+      return {
+        placements: state.placements.map((p) => {
+          if (!idSet.has(p.id)) return p;
+          const mod = getModuleById(p.moduleId);
+          if (!mod) return p;
+
+          const oldRot = p.rotation;
+          const newRot = (oldRot + ROTATION_STEP * direction + 360) % 360;
+
+          const hw = mod.gridWidth / 2;
+          const hd = mod.gridDepth / 2;
+          const oldRad = (oldRot * Math.PI) / 180;
+          const newRad = (newRot * Math.PI) / 180;
+          const oldCos = Math.cos(oldRad), oldSin = Math.sin(oldRad);
+          const newCos = Math.cos(newRad), newSin = Math.sin(newRad);
+
+          const cx = p.gridX + hw * oldCos - hd * oldSin;
+          const cz = p.gridZ + hw * oldSin + hd * oldCos;
+
+          const newGridX = cx - (hw * newCos - hd * newSin);
+          const newGridZ = cz - (hw * newSin + hd * newCos);
+
+          return { ...p, rotation: newRot, gridX: newGridX, gridZ: newGridZ };
+        }),
         undoStack: pushUndo(state.undoStack, state.placements),
         redoStack: [],
       };

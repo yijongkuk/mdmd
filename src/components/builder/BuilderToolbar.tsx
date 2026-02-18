@@ -10,7 +10,6 @@ import {
   Grid3x3,
   Satellite,
 } from 'lucide-react';
-import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import {
@@ -34,7 +33,7 @@ export function BuilderToolbar() {
   const undoStack = useBuilderStore((s) => s.undoStack);
   const redoStack = useBuilderStore((s) => s.redoStack);
   const selectedPlacementIds = useBuilderStore((s) => s.selectedPlacementIds);
-  const rotatePlacement = useBuilderStore((s) => s.rotatePlacement);
+  const rotatePlacements = useBuilderStore((s) => s.rotatePlacements);
   const showSurrounding = useBuilderStore((s) => s.showSurrounding);
   const toggleSurrounding = useBuilderStore((s) => s.toggleSurrounding);
   const showSatellite = useBuilderStore((s) => s.showSatellite);
@@ -43,7 +42,7 @@ export function BuilderToolbar() {
   const toggleGridSnap = useBuilderStore((s) => s.toggleGridSnap);
   const copyPlacements = useBuilderStore((s) => s.copyPlacements);
   const pastePlacements = useBuilderStore((s) => s.pastePlacements);
-  const removePlacement = useBuilderStore((s) => s.removePlacement);
+  const removePlacements = useBuilderStore((s) => s.removePlacements);
   const selectPlacement = useBuilderStore((s) => s.selectPlacement);
   const toggleViewAllFloors = useBuilderStore((s) => s.toggleViewAllFloors);
   const showToast = useBuilderStore((s) => s.showToast);
@@ -101,20 +100,20 @@ export function BuilderToolbar() {
           if (activeTool === 'place') break;
           e.preventDefault();
           if (selectedPlacementIds.length > 0) {
-            selectedPlacementIds.forEach((id) => rotatePlacement(id, 1));
+            rotatePlacements(selectedPlacementIds, 1);
           }
           break;
         case 'r':
           // R = counter-clockwise rotation (place mode handled by GhostModule)
           if (activeTool === 'place') break;
           if (selectedPlacementIds.length > 0) {
-            selectedPlacementIds.forEach((id) => rotatePlacement(id, -1));
+            rotatePlacements(selectedPlacementIds, -1);
           }
           break;
         case 'x':
         case 'delete':
           if (selectedPlacementIds.length > 0) {
-            selectedPlacementIds.forEach((id) => removePlacement(id));
+            removePlacements(selectedPlacementIds);
             selectPlacement(null);
           }
           break;
@@ -126,7 +125,7 @@ export function BuilderToolbar() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeTool, setActiveTool, undo, redo, selectedPlacementIds, rotatePlacement, copyPlacements, pastePlacements, removePlacement, selectPlacement, showToast, toggleGridSnap, toggleViewAllFloors]);
+  }, [activeTool, setActiveTool, undo, redo, selectedPlacementIds, rotatePlacements, copyPlacements, pastePlacements, removePlacements, selectPlacement, showToast, toggleGridSnap, toggleViewAllFloors]);
 
   return (
     <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 shadow-sm overflow-x-auto">

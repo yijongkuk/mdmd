@@ -15,7 +15,7 @@ import { CostStatusBar } from '@/components/builder/CostStatusBar';
 import { BuilderToast } from '@/components/builder/BuilderToast';
 import { BoxSelectOverlay } from '@/components/builder/BoxSelectOverlay';
 import { FLOOR_HEIGHT, ROTATION_STEP } from '@/lib/constants/grid';
-import { RotateCcw, RotateCw } from 'lucide-react';
+import { RotateCcw, RotateCw, Trash2 } from 'lucide-react';
 import { getModuleById } from '@/lib/constants/modules';
 import { getMaterialById } from '@/lib/constants/materials';
 import { formatWon, formatDate } from '@/lib/utils/format';
@@ -273,6 +273,10 @@ export default function BuilderPage() {
   const activeTool = useBuilderStore((s) => s.activeTool);
   const ghostRotation = useBuilderStore((s) => s.ghostRotation);
   const rotateGhost = useBuilderStore((s) => s.rotateGhost);
+  const selectedPlacementIds = useBuilderStore((s) => s.selectedPlacementIds);
+  const rotatePlacements = useBuilderStore((s) => s.rotatePlacements);
+  const removePlacements = useBuilderStore((s) => s.removePlacements);
+  const selectPlacement = useBuilderStore((s) => s.selectPlacement);
 
   // Boundary dimensions from regulation
   const boundaryWidth = regulation
@@ -354,6 +358,32 @@ export default function BuilderPage() {
               >
                 <RotateCw className="h-4 w-4 text-slate-600" />
                 <span className="text-xs text-slate-600">{isMobile ? `+${ROTATION_STEP}°` : `Space`}</span>
+              </button>
+            </div>
+          )}
+          {/* 선택 모드: 회전 + 삭제 버튼 */}
+          {activeTool !== 'place' && selectedPlacementIds.length > 0 && (
+            <div className="mt-2 flex items-center justify-center gap-2">
+              <button
+                className="flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 shadow-sm active:bg-slate-100 hover:bg-slate-50 cursor-pointer"
+                onPointerDown={(e) => { e.stopPropagation(); rotatePlacements(selectedPlacementIds, -1); }}
+              >
+                <RotateCcw className="h-4 w-4 text-slate-600" />
+                <span className="text-xs text-slate-600">{isMobile ? `-${ROTATION_STEP}°` : `R`}</span>
+              </button>
+              <button
+                className="flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 shadow-sm active:bg-slate-100 hover:bg-slate-50 cursor-pointer"
+                onPointerDown={(e) => { e.stopPropagation(); rotatePlacements(selectedPlacementIds, 1); }}
+              >
+                <RotateCw className="h-4 w-4 text-slate-600" />
+                <span className="text-xs text-slate-600">{isMobile ? `+${ROTATION_STEP}°` : `Space`}</span>
+              </button>
+              <button
+                className="flex h-9 items-center gap-1 rounded-lg border border-red-200 bg-white px-3 shadow-sm active:bg-red-100 hover:bg-red-50 cursor-pointer"
+                onPointerDown={(e) => { e.stopPropagation(); removePlacements(selectedPlacementIds); selectPlacement(null); }}
+              >
+                <Trash2 className="h-4 w-4 text-red-500" />
+                <span className="text-xs text-red-500">{isMobile ? '삭제' : `Del`}</span>
               </button>
             </div>
           )}
