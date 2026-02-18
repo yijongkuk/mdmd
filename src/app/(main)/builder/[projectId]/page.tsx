@@ -399,6 +399,7 @@ export default function BuilderPage() {
           onOpenChange={handleRightSidebarChange}
         >
           <PropertyPanel
+            projectId={projectId}
             onSave={manualSave}
             saveStatus={saveStatus}
             lastSavedAt={lastSavedAt}

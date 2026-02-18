@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { RotateCw, Trash2, Box, Layers, Save, Check, Loader2, AlertCircle, Pencil, Upload, Mountain } from 'lucide-react';
-import { SpeckleExportDialog } from './SpeckleExportDialog';
+import { createPortal } from 'react-dom';
+import { useRouter } from 'next/navigation';
+import { RotateCw, Trash2, Box, Layers, Save, Check, Loader2, AlertCircle, Pencil, Mountain } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -65,14 +66,11 @@ function FloorAreaTable() {
 }
 
 interface ProjectSummaryProps {
-  onSave?: () => void;
-  saveStatus?: 'idle' | 'saving' | 'saved' | 'error';
-  lastSavedAt?: string | null;
   onRename?: (name: string) => void;
   parcelPnu?: string | null;
 }
 
-function ProjectSummary({ onSave, saveStatus = 'idle', lastSavedAt, onRename, parcelPnu }: ProjectSummaryProps) {
+function ProjectSummary({ onRename, parcelPnu }: ProjectSummaryProps) {
   const placements = useBuilderStore((s) => s.placements);
   const projectName = useBuilderStore((s) => s.projectName);
   const setProjectName = useBuilderStore((s) => s.setProjectName);
@@ -186,40 +184,6 @@ function ProjectSummary({ onSave, saveStatus = 'idle', lastSavedAt, onRename, pa
           <span className="text-slate-500">총 비용</span>
           <span className="font-semibold text-slate-900">{formatWon(totalCost)}</span>
         </div>
-      </div>
-
-      {/* Save button + status */}
-      <Separator />
-      <div className="space-y-2">
-        <Button
-          variant="outline"
-          size="sm"
-          className="w-full"
-          onClick={onSave}
-          disabled={saveStatus === 'saving'}
-        >
-          {saveStatus === 'saving' ? (
-            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-          ) : saveStatus === 'saved' ? (
-            <Check className="mr-1.5 h-3.5 w-3.5 text-green-600" />
-          ) : saveStatus === 'error' ? (
-            <AlertCircle className="mr-1.5 h-3.5 w-3.5 text-red-500" />
-          ) : (
-            <Save className="mr-1.5 h-3.5 w-3.5" />
-          )}
-          {saveStatus === 'saving'
-            ? '저장 중...'
-            : saveStatus === 'saved'
-              ? '저장 완료'
-              : saveStatus === 'error'
-                ? '저장 실패 (재시도)'
-                : '프로젝트 저장'}
-        </Button>
-        {lastSavedAt && (
-          <p className="text-center text-xs text-slate-400">
-            마지막 저장: {lastSavedAt}
-          </p>
-        )}
       </div>
 
       {/* 층별 건축가능 면적 테이블 */}
@@ -502,6 +466,7 @@ function SelectedModulePanel() {
 }
 
 interface PropertyPanelProps {
+  projectId?: string;
   onSave?: () => void;
   saveStatus?: 'idle' | 'saving' | 'saved' | 'error';
   lastSavedAt?: string | null;
@@ -509,21 +474,31 @@ interface PropertyPanelProps {
   parcelPnu?: string | null;
 }
 
-export function PropertyPanel({ onSave, saveStatus, lastSavedAt, onRename, parcelPnu }: PropertyPanelProps) {
+export function PropertyPanel({ projectId, onSave, saveStatus, lastSavedAt, onRename, parcelPnu }: PropertyPanelProps) {
+  const router = useRouter();
   const selectedPlacementIds = useBuilderStore((s) => s.selectedPlacementIds);
-  const placements = useBuilderStore((s) => s.placements);
+  const projectName = useBuilderStore((s) => s.projectName);
   const hasSelection = selectedPlacementIds.length > 0;
-  const hasModules = placements.length > 0;
-  const [exportOpen, setExportOpen] = useState(false);
-  const [exportModels, setExportModels] = useState<{ name: string; commitCount: number }[]>([]);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
-  // 마운트 시 Speckle 기존 모델 목록 미리 fetch
-  useEffect(() => {
-    fetch('/api/speckle/export')
-      .then((r) => r.json())
-      .then((data) => { if (data.models) setExportModels(data.models); })
-      .catch(() => {});
-  }, []);
+  const handleDelete = useCallback(async () => {
+    if (!projectId) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, { method: 'DELETE' });
+      if (res.ok) {
+        router.push('/projects');
+      } else {
+        alert('삭제에 실패했습니다.');
+      }
+    } catch {
+      alert('삭제 중 오류가 발생했습니다.');
+    } finally {
+      setDeleting(false);
+      setDeleteConfirmOpen(false);
+    }
+  }, [projectId, router]);
 
   return (
     <div className="flex h-full flex-col">
@@ -540,22 +515,105 @@ export function PropertyPanel({ onSave, saveStatus, lastSavedAt, onRename, parce
         {hasSelection ? (
           <SelectedModulePanel />
         ) : (
-          <ProjectSummary onSave={onSave} saveStatus={saveStatus} lastSavedAt={lastSavedAt} onRename={onRename} parcelPnu={parcelPnu} />
+          <ProjectSummary onRename={onRename} parcelPnu={parcelPnu} />
         )}
       </ScrollArea>
-      {/* Sticky export button at bottom */}
-      {hasModules && (
-        <div className="border-t border-slate-200 p-4">
-          <Button
-            size="sm"
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-            onClick={() => setExportOpen(true)}
-          >
-            <Upload className="mr-1.5 h-3.5 w-3.5" />
-            모듈 내보내기
-          </Button>
-          <SpeckleExportDialog open={exportOpen} onOpenChange={setExportOpen} prefetchedModels={exportModels} />
-        </div>
+      {/* Sticky bottom: save + delete */}
+      <div className="border-t border-slate-200 p-4 space-y-3">
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full"
+          onClick={onSave}
+          disabled={saveStatus === 'saving'}
+        >
+          {saveStatus === 'saving' ? (
+            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+          ) : saveStatus === 'saved' ? (
+            <Check className="mr-1.5 h-3.5 w-3.5 text-green-600" />
+          ) : saveStatus === 'error' ? (
+            <AlertCircle className="mr-1.5 h-3.5 w-3.5 text-red-500" />
+          ) : (
+            <Save className="mr-1.5 h-3.5 w-3.5" />
+          )}
+          {saveStatus === 'saving'
+            ? '저장 중...'
+            : saveStatus === 'saved'
+              ? '저장 완료'
+              : saveStatus === 'error'
+                ? '저장 실패 (재시도)'
+                : '프로젝트 저장'}
+        </Button>
+        {lastSavedAt && (
+          <p className="text-center text-xs text-slate-400">
+            마지막 저장: {lastSavedAt}
+          </p>
+        )}
+        {projectId && (
+          <>
+            <Separator />
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+              onClick={() => setDeleteConfirmOpen(true)}
+            >
+              <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+              프로젝트 삭제
+            </Button>
+          </>
+        )}
+      </div>
+
+      {/* Delete confirmation modal — portal to body for full-screen overlay */}
+      {deleteConfirmOpen && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => !deleting && setDeleteConfirmOpen(false)}
+          />
+          {/* Dialog */}
+          <div className="relative z-10 mx-4 w-full max-w-sm rounded-xl bg-white p-6 shadow-2xl">
+            <div className="flex flex-col items-center text-center">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-100">
+                <Trash2 className="h-6 w-6 text-red-600" />
+              </div>
+              <h3 className="mt-4 text-lg font-semibold text-slate-900">프로젝트 삭제</h3>
+              <p className="mt-2 text-sm text-slate-500 leading-relaxed">
+                <span className="font-medium text-slate-700">{projectName}</span> 프로젝트를 삭제하시겠습니까?
+                <br />
+                모든 배치 데이터가 영구적으로 삭제됩니다.
+              </p>
+              <div className="mt-6 flex w-full gap-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1"
+                  onClick={() => setDeleteConfirmOpen(false)}
+                  disabled={deleting}
+                >
+                  취소
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="flex-1"
+                  onClick={handleDelete}
+                  disabled={deleting}
+                >
+                  {deleting ? (
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                  )}
+                  {deleting ? '삭제 중...' : '삭제'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

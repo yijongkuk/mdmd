@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useRef, useEffect, useSyncExternalStore } from 'react';
-import { Search } from 'lucide-react';
+import { Search, Upload } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { MODULES_BY_CATEGORY } from '@/lib/constants/modules';
@@ -11,6 +12,7 @@ import { type ModuleCategory, type ModuleDefinition } from '@/types/builder';
 import { formatWon } from '@/lib/utils/format';
 import { useBuilderStore } from '@/features/builder/store';
 import { subscribe, getSnapshot, getMeshData, isCustomModule } from '@/lib/speckle/customModules';
+import { SpeckleExportDialog } from './SpeckleExportDialog';
 
 const CATEGORY_TAB_MAP: { value: ModuleCategory; label: string }[] = [
   { value: 'STRUCTURAL', label: '구조' },
@@ -183,9 +185,21 @@ function ModuleCard({ module }: { module: ModuleDefinition }) {
 
 export function ModuleLibrary() {
   const [search, setSearch] = useState('');
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportModels, setExportModels] = useState<{ name: string; commitCount: number }[]>([]);
+  const placements = useBuilderStore((s) => s.placements);
+  const hasModules = placements.length > 0;
 
   // Speckle 커스텀 모듈 구독 (등록될 때마다 자동 리렌더)
   const customModules = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+
+  // 마운트 시 Speckle 기존 모델 목록 미리 fetch
+  useEffect(() => {
+    fetch('/api/speckle/export')
+      .then((r) => r.json())
+      .then((data) => { if (data.models) setExportModels(data.models); })
+      .catch(() => {});
+  }, []);
 
   const filterModules = (modules: ModuleDefinition[]) => {
     if (!search.trim()) return modules;
@@ -249,6 +263,21 @@ export function ModuleLibrary() {
           );
         })}
       </Tabs>
+
+      {/* Sticky export button at bottom */}
+      {hasModules && (
+        <div className="border-t border-slate-200 p-4">
+          <Button
+            size="sm"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+            onClick={() => setExportOpen(true)}
+          >
+            <Upload className="mr-1.5 h-3.5 w-3.5" />
+            모듈 내보내기
+          </Button>
+          <SpeckleExportDialog open={exportOpen} onOpenChange={setExportOpen} prefetchedModels={exportModels} />
+        </div>
+      )}
     </div>
   );
 }
