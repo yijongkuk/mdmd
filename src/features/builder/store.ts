@@ -40,7 +40,6 @@ interface BuilderStore {
   clipboard: Omit<ModulePlacement, 'id' | 'floor'>[] | null;
   parcelCenter: { lat: number; lng: number } | null;
   ghostRotation: number;
-  regulationOverrides: { maxCoverageRatio?: number; maxFloorAreaRatio?: number } | null;
 
   // Undo/Redo
   undoStack: ModulePlacement[][];
@@ -87,8 +86,6 @@ interface BuilderStore {
   clearAll: () => void;
   setParcelCenter: (center: { lat: number; lng: number } | null) => void;
   rotateGhost: (direction: 1 | -1) => void;
-  setRegulationOverride: (field: 'maxCoverageRatio' | 'maxFloorAreaRatio', value: number) => void;
-  resetRegulationOverrides: () => void;
 }
 
 function pushUndo(undoStack: ModulePlacement[][], snapshot: ModulePlacement[]): ModulePlacement[][] {
@@ -126,7 +123,6 @@ export const useBuilderStore = create<BuilderStore>((set) => ({
   clipboard: null,
   parcelCenter: null,
   ghostRotation: 0,
-  regulationOverrides: null,
   undoStack: [],
   redoStack: [],
 
@@ -404,8 +400,4 @@ export const useBuilderStore = create<BuilderStore>((set) => ({
 
   setParcelCenter: (center) => set({ parcelCenter: center }),
   rotateGhost: (direction) => set((s) => ({ ghostRotation: (s.ghostRotation + ROTATION_STEP * direction + 360) % 360 })),
-  setRegulationOverride: (field, value) => set((s) => ({
-    regulationOverrides: { ...s.regulationOverrides, [field]: value },
-  })),
-  resetRegulationOverrides: () => set({ regulationOverrides: null }),
 }));

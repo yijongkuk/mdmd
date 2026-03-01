@@ -14,7 +14,7 @@ export function useRegulations(
   return useMemo(() => {
     if (!parcel) return null;
     return calculateRegulations(parcel);
-  }, [parcel?.area, parcel?.zoneType, parcel?.width, parcel?.depth, parcel?.pnu]);
+  }, [parcel?.area, parcel?.zoneType, parcel?.width, parcel?.depth]);
 }
 
 export function useComplianceCheck(

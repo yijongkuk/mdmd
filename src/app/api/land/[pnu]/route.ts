@@ -25,7 +25,6 @@ export async function GET(
       const regResult = calculateRegulations({
         area: parcelWithZone.area ?? 0,
         zoneType: parcelWithZone.zoneType ?? 'ZONE_R2_GENERAL',
-        pnu,
       });
 
       const parcelInfo: ParcelInfo = {
@@ -50,8 +49,6 @@ export async function GET(
           setbackRight: regResult.zoneRegulation.setbackRight,
           buildableArea: regResult.buildableArea,
           maxTotalFloorArea: regResult.maxTotalFloorArea,
-          regulationSource: regResult.regulationSource,
-          municipalityName: regResult.municipalityName,
         },
       };
       return NextResponse.json(parcelInfo);
@@ -69,7 +66,6 @@ export async function GET(
   const regResult = calculateRegulations({
     area: parcel.area,
     zoneType: parcel.zoneType ?? 'ZONE_R2_GENERAL',
-    pnu,
   });
 
   const parcelInfo: ParcelInfo = {
@@ -85,8 +81,6 @@ export async function GET(
       setbackRight: regResult.zoneRegulation.setbackRight,
       buildableArea: regResult.buildableArea,
       maxTotalFloorArea: regResult.maxTotalFloorArea,
-      regulationSource: regResult.regulationSource,
-      municipalityName: regResult.municipalityName,
     },
   };
   return NextResponse.json(parcelInfo);

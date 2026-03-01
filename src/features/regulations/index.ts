@@ -20,6 +20,3 @@ export type {
 export { checkCompliance } from './complianceChecker';
 
 export { useRegulations, useComplianceCheck } from './hooks';
-
-export type { MunicipalOverride, MunicipalityEntry, MunicipalLookupResult } from './municipalityTable';
-export { getMunicipalOverride, extractSido, extractSigungu, extractSi } from './municipalityTable';

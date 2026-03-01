@@ -25,7 +25,6 @@ import type { ModulePlacement } from '@/types/builder';
 import { fetchParcelByPnu } from '@/features/land/services';
 import { useSpeckleSync } from '@/lib/speckle/useSpeckleSync';
 import { useIsMobile } from '@/hooks/useIsMobile';
-import { RegulationOverridePanel } from '@/components/builder/RegulationOverridePanel';
 
 const BuilderCanvas = dynamic(
   () => import('@/components/builder/BuilderCanvas').then((m) => m.BuilderCanvas),
@@ -62,7 +61,6 @@ export default function BuilderPage() {
   const loadPlacements = useBuilderStore((s) => s.loadPlacements);
   const placements = useBuilderStore((s) => s.placements);
   const setParcelCenter = useBuilderStore((s) => s.setParcelCenter);
-  const regulationOverrides = useBuilderStore((s) => s.regulationOverrides);
 
   const isMobile = useIsMobile();
 
@@ -127,7 +125,6 @@ export default function BuilderPage() {
         zoneType: parcelInfo.zoneType ?? 'ZONE_R2_GENERAL',
         width: side,
         depth: side,
-        pnu: parcelInfo.pnu,
       };
     }
     return { area: 200, zoneType: 'ZONE_R1_GENERAL' as const, width: 14, depth: 14.3 };
@@ -135,30 +132,13 @@ export default function BuilderPage() {
 
   const regulation = useRegulations(parcel);
 
-  // 사용자 오버라이드가 적용된 effective regulation
-  const effectiveRegulation = useMemo(() => {
-    if (!regulation) return null;
-    if (!regulationOverrides) return regulation;
-    const overriddenReg = {
-      ...regulation,
-      zoneRegulation: {
-        ...regulation.zoneRegulation,
-        maxCoverageRatio: regulationOverrides.maxCoverageRatio ?? regulation.zoneRegulation.maxCoverageRatio,
-        maxFloorAreaRatio: regulationOverrides.maxFloorAreaRatio ?? regulation.zoneRegulation.maxFloorAreaRatio,
-      },
-      maxBuildingFootprint: (parcel.area * (regulationOverrides.maxCoverageRatio ?? regulation.zoneRegulation.maxCoverageRatio)) / 100,
-      maxTotalFloorArea: (parcel.area * (regulationOverrides.maxFloorAreaRatio ?? regulation.zoneRegulation.maxFloorAreaRatio)) / 100,
-    };
-    return overriddenReg;
-  }, [regulation, regulationOverrides, parcel.area]);
-
   // 규제 기반 최대 층수를 스토어에 반영
   useEffect(() => {
-    if (effectiveRegulation) {
-      const floors = effectiveRegulation.effectiveMaxFloors;
+    if (regulation) {
+      const floors = regulation.effectiveMaxFloors;
       setMaxFloors(Math.max(2, Math.min(floors, 50)));
     }
-  }, [effectiveRegulation, setMaxFloors]);
+  }, [regulation, setMaxFloors]);
 
   // Save function (수동 저장 전용)
   const saveToServer = useCallback(async (pl: ModulePlacement[]) => {
@@ -299,16 +279,16 @@ export default function BuilderPage() {
   const selectPlacement = useBuilderStore((s) => s.selectPlacement);
 
   // Boundary dimensions from regulation
-  const boundaryWidth = effectiveRegulation
-    ? Math.sqrt(effectiveRegulation.buildableArea) * 1.2
+  const boundaryWidth = regulation
+    ? Math.sqrt(regulation.buildableArea) * 1.2
     : 12;
-  const boundaryDepth = effectiveRegulation
-    ? Math.sqrt(effectiveRegulation.buildableArea) * 1.2
+  const boundaryDepth = regulation
+    ? Math.sqrt(regulation.buildableArea) * 1.2
     : 12;
-  const boundaryHeight = effectiveRegulation
-    ? effectiveRegulation.zoneRegulation.maxHeight > 0
-      ? effectiveRegulation.zoneRegulation.maxHeight
-      : effectiveRegulation.effectiveMaxFloors * FLOOR_HEIGHT
+  const boundaryHeight = regulation
+    ? regulation.zoneRegulation.maxHeight > 0
+      ? regulation.zoneRegulation.maxHeight
+      : regulation.effectiveMaxFloors * FLOOR_HEIGHT
     : 15;
 
   return (
@@ -322,12 +302,9 @@ export default function BuilderPage() {
               <span className="text-blue-700">|</span>
               <span className="text-blue-700">{parcelInfo.area.toFixed(1)}m²</span>
               <span className="text-blue-700">|</span>
-              <RegulationOverridePanel
-                maxCoverageRatio={parcelInfo.regulation?.maxCoverageRatio ?? 60}
-                maxFloorAreaRatio={parcelInfo.regulation?.maxFloorAreaRatio ?? 200}
-                regulationSource={parcelInfo.regulation?.regulationSource}
-                municipalityName={parcelInfo.regulation?.municipalityName}
-              />
+              <span className="text-blue-700">
+                건폐율 {parcelInfo.regulation?.maxCoverageRatio}% / 용적률 {parcelInfo.regulation?.maxFloorAreaRatio}%
+              </span>
               {(parcelInfo.officialPrice != null && parcelInfo.officialPrice > 0) && (
                 <>
                   <span className="text-blue-700">|</span>
@@ -469,11 +446,11 @@ export default function BuilderPage() {
       {/* Bottom status bar */}
       <CostStatusBar
         parcelArea={parcel.area}
-        maxCoverageRatio={effectiveRegulation?.zoneRegulation.maxCoverageRatio}
-        maxFloorAreaRatio={effectiveRegulation?.zoneRegulation.maxFloorAreaRatio}
+        maxCoverageRatio={regulation?.zoneRegulation.maxCoverageRatio}
+        maxFloorAreaRatio={regulation?.zoneRegulation.maxFloorAreaRatio}
         maxHeight={
-          effectiveRegulation?.zoneRegulation.maxHeight && effectiveRegulation.zoneRegulation.maxHeight > 0
-            ? effectiveRegulation.zoneRegulation.maxHeight
+          regulation?.zoneRegulation.maxHeight && regulation.zoneRegulation.maxHeight > 0
+            ? regulation.zoneRegulation.maxHeight
             : undefined
         }
       />
