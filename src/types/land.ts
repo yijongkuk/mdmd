@@ -100,6 +100,8 @@ export interface ParcelInfo extends LandParcel {
     setbackRight: number;
     buildableArea: number;
     maxTotalFloorArea: number;
+    regulationSource?: 'statutory' | 'municipal';
+    municipalityName?: string;
   };
 }
 

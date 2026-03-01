@@ -263,6 +263,7 @@ function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showS
   const terrainBaseY = useBuilderStore((s) => s.terrainBaseY);
   const setTerrainBaseY = useBuilderStore((s) => s.setTerrainBaseY);
   const setMaxFloors = useBuilderStore((s) => s.setMaxFloors);
+  const regulationOverrides = useBuilderStore((s) => s.regulationOverrides);
 
   const visiblePlacements = placements.filter((p) => visibleFloors.includes(p.floor));
 
@@ -296,8 +297,8 @@ function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showS
     if (!regulationPolygon || !parcelInfo) return { buildablePolygon: null, buildableCells: null, volumeHeight: 0, effectiveFloors: 0 };
 
     const reg = parcelInfo.regulation;
-    const maxCoverage = reg?.maxCoverageRatio ?? 60;
-    const maxFAR = reg?.maxFloorAreaRatio ?? 200;
+    const maxCoverage = regulationOverrides?.maxCoverageRatio ?? reg?.maxCoverageRatio ?? 60;
+    const maxFAR = regulationOverrides?.maxFloorAreaRatio ?? reg?.maxFloorAreaRatio ?? 200;
     const maxFootprint = parcelInfo.area * maxCoverage / 100;
 
     // 1. Cells within regulation polygon — for collision detection (handles concave parcels)
@@ -335,7 +336,7 @@ function Scene({ boundaryWidth, boundaryDepth, boundaryHeight, parcelInfo, showS
     const height = effectiveFloors * 3;
 
     return { buildablePolygon: footprint, buildableCells: cells, volumeHeight: height, effectiveFloors };
-  }, [regulationPolygon, parcelInfo, gridOffset]);
+  }, [regulationPolygon, parcelInfo, gridOffset, regulationOverrides]);
 
   // Sync effective floors to store so FloorNavigator shows correct count
   useEffect(() => {
