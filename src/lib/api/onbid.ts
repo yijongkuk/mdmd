@@ -140,12 +140,28 @@ export async function getKamcoAuctionList(
       query.set('CLTR_NM', params.regionKeyword);
     }
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60_000);
-    const res = await fetch(`${BASE_URL}/getKamcoPbctCltrList?${query.toString()}`, {
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
+    // 최대 2회 시도 (1차 실패 시 재시도)
+    let res: Response | null = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120_000);
+      try {
+        res = await fetch(`${BASE_URL}/getKamcoPbctCltrList?${query.toString()}`, {
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        break; // 성공 시 루프 탈출
+      } catch (retryErr) {
+        clearTimeout(timeoutId);
+        if (attempt === 0) {
+          console.warn(`OnBid retry (region=${regionKey}, page=${page})`);
+          await new Promise((r) => setTimeout(r, 2000)); // 2초 대기 후 재시도
+          continue;
+        }
+        throw retryErr; // 2차도 실패 시 상위 catch로
+      }
+    }
+    if (!res) throw new Error('fetch failed after retries');
 
     if (!res.ok) {
       const errMsg = `OnBid HTTP ${res.status} ${res.statusText} (region=${regionKey}, page=${page})`;

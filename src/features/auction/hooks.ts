@@ -237,7 +237,7 @@ export function useAuctionProperties(
           }).catch(() => ({ properties: [] as AuctionProperty[], totalCount: 0, page, pageSize: 1000 }))
         );
 
-        await runWithConcurrency(phase1Tasks, 10, (r) => {
+        await runWithConcurrency(phase1Tasks, 3, (r) => {
           // API 에러 감지 (OnBid 한도 초과, 키 오류 등)
           if ('apiError' in r && (r as { apiError?: string }).apiError && !firstApiError) {
             firstApiError = (r as { apiError?: string }).apiError!;
