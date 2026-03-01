@@ -20,6 +20,7 @@ export const DEFAULT_FILTERS: AuctionFilters = {
   dataSources: [],
   excludeLowUnitPrice: true,
   excludeDifficultSoil: false,
+  excludeShareProperties: true,
 };
 
 type SoilDifficulty = 'good' | 'moderate' | 'difficult';

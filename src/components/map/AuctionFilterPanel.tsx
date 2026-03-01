@@ -130,6 +130,11 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
         if (p.area != null && p.area > 0 && p.appraisalValue / p.area < 10_000) return false;
         if (!p.officialLandPrice && p.appraisalValue < 1_000_000) return false;
       }
+      // 지분 물건 제외
+      if (filters.excludeShareProperties) {
+        const nm = p.name ?? '';
+        if (nm.includes('지분') || nm.includes('공유지분') || nm.includes('持分')) return false;
+      }
       // 가격 필터
       if (p.appraisalValue > 0) {
         if (p.appraisalValue < filters.priceRange[0] || p.appraisalValue > filters.priceRange[1]) return false;
@@ -145,7 +150,7 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
       }
       return true;
     });
-  }, [viewportProperties, filters.priceRange, filters.areaRange, filters.searchQuery]);
+  }, [viewportProperties, filters.priceRange, filters.areaRange, filters.searchQuery, filters.excludeShareProperties]);
 
   // Extract unique disposal methods with counts (가격/면적 필터 반영)
   const disposalMethodCounts = useMemo(() => {
@@ -562,10 +567,19 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
           </div>
         )}
 
-        {/* Soil difficulty filter */}
+        {/* 물건 필터 */}
         <div>
           <label className="text-xs font-medium text-slate-500 mb-1.5 block">
-            토양 정보
+            물건 필터
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-slate-50">
+            <input
+              type="checkbox"
+              checked={filters.excludeShareProperties}
+              onChange={() => onFiltersChange({ ...filters, excludeShareProperties: !filters.excludeShareProperties })}
+              className="h-3.5 w-3.5 rounded border-slate-300 text-red-500 focus:ring-red-500"
+            />
+            <span className="text-xs text-slate-700">지분 물건 제외</span>
           </label>
           <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-slate-50">
             <input

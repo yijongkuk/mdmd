@@ -49,4 +49,5 @@ export interface AuctionFilters {
   dataSources: string[];
   excludeLowUnitPrice: boolean;  // 단가 1만원/m² 미만 제외
   excludeDifficultSoil: boolean; // 기초공사 어려움 제외
+  excludeShareProperties: boolean; // 지분 물건 제외
 }

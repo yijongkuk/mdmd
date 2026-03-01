@@ -82,6 +82,11 @@ function MapPageInner() {
       // 면적 없거나 공시지가 없는데 감정가 100만원 미만 → 비정상
       if (!p.officialLandPrice && p.appraisalValue < 1_000_000) return false;
     }
+    // 지분 물건 제외 — 물건명에 "지분" 포함 시 제외
+    if (filters.excludeShareProperties) {
+      const nm = p.name ?? '';
+      if (nm.includes('지분') || nm.includes('공유지분') || nm.includes('持分')) return false;
+    }
     // 토양 난이도 필터 — PNU 없거나 미조회는 통과
     if (filters.excludeDifficultSoil && p.pnu && soilDifficultyMap[p.pnu] === 'difficult') return false;
     // 데이터 소스 필터
