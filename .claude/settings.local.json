@@ -96,7 +96,30 @@
       "Bash(npx tsx:*)",
       "Bash(sqlite3:*)",
       "Bash(wmic process where \"CommandLine like ''%next%dev%'' and Name=''node.exe''\" get ProcessId,CommandLine /format:list)",
-      "Bash(git ls-tree:*)"
+      "Bash(git ls-tree:*)",
+      "WebFetch(domain:soil.rda.go.kr)",
+      "WebFetch(domain:farmbiz.xyz)",
+      "WebFetch(domain:www.geoinfo.or.kr)",
+      "WebFetch(domain:data.seoul.go.kr)",
+      "WebFetch(domain:data.kigam.re.kr)",
+      "WebFetch(domain:infuser.odcloud.kr)",
+      "Bash(npx vercel logs:*)",
+      "Bash(npx vercel ls:*)",
+      "Bash(npx vercel inspect:*)",
+      "Bash(npx vercel project ls:*)",
+      "Bash(npx vercel env:*)",
+      "Bash(printf:*)",
+      "Bash(npx vercel:*)",
+      "Bash(git archive:*)",
+      "Bash(tar -xf:*)",
+      "Bash(if [ $? -ne 0 ])",
+      "Bash(then mkdir -p \"D:\\\\IRENEHAUS\\\\10_BM\\\\mdmd\\(gemini\\)\")",
+      "Bash(fi)",
+      "Bash(find:*)",
+      "WebFetch(domain:www.eiass.go.kr)",
+      "WebFetch(domain:qquack.org)",
+      "WebFetch(domain:www.eum.go.kr)",
+      "Bash(git revert:*)"
     ]
   }
 }

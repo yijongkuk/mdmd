@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Box, Map, FolderOpen } from 'lucide-react';
+import { useSession, signOut } from 'next-auth/react';
+import { Box, Map, FolderOpen, LogOut } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useBuilderStore } from '@/features/builder/store';
 
@@ -13,6 +14,7 @@ const navLinks = [
 
 export function Header() {
   const pathname = usePathname();
+  const { data: session } = useSession();
   const parcelCenter = useBuilderStore((s) => s.parcelCenter);
 
   const isBuilder = pathname?.startsWith('/builder');
@@ -53,6 +55,15 @@ export function Header() {
               {label}
             </Link>
           ))}
+          {session && (
+            <button
+              onClick={() => signOut({ callbackUrl: '/login' })}
+              className="ml-2 flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
+            >
+              <LogOut className="h-4 w-4" />
+              로그아웃
+            </button>
+          )}
         </nav>
       </div>
     </header>
