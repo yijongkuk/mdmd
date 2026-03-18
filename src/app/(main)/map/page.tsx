@@ -26,6 +26,8 @@ function hasActiveFilters(filters: AuctionFilters): boolean {
     filters.category !== 'land' ||
     filters.priceRange[0] !== 0 ||
     filters.priceRange[1] < Number.MAX_SAFE_INTEGER ||
+    filters.bidPriceRange[0] !== 0 ||
+    filters.bidPriceRange[1] < Number.MAX_SAFE_INTEGER ||
     filters.areaRange[0] !== 0 ||
     filters.areaRange[1] < Number.MAX_SAFE_INTEGER ||
     filters.disposalMethods.length > 0 ||
@@ -102,6 +104,10 @@ function MapPageInner() {
     // 감정가액 기준 필터
     if (p.appraisalValue > 0) {
       if (p.appraisalValue < filters.priceRange[0] || p.appraisalValue > filters.priceRange[1]) return false;
+    }
+    // 최저입찰가 기준 필터
+    if (p.minBidPrice > 0) {
+      if (p.minBidPrice < filters.bidPriceRange[0] || p.minBidPrice > filters.bidPriceRange[1]) return false;
     }
     if (p.area != null) {
       if (p.area < filters.areaRange[0] || p.area > filters.areaRange[1]) return false;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, memo } from 'react';
+import { useState, useEffect, useRef, memo } from 'react';
 import { useRouter } from 'next/navigation';
 import { X, ExternalLink, MapPin, Calendar, Tag, Gavel, ArrowRight, Ruler, Banknote, Map, School, Layers } from 'lucide-react';
 import type { AuctionProperty } from '@/types/auction';
@@ -80,7 +80,25 @@ export const AuctionInfoPanel = memo(function AuctionInfoPanel({ property, onClo
 
   const isBuilding = property ? isBuildingCategory(property.itemType, property.name) : false;
 
+  const [selectedImgIdx, setSelectedImgIdx] = useState(0);
+  const [imgError, setImgError] = useState<Set<number>>(new Set());
+  const thumbRef = useRef<HTMLDivElement>(null);
+
+  // Reset image state when property changes
+  useEffect(() => {
+    setSelectedImgIdx(0);
+    setImgError(new Set());
+  }, [property?.id]);
+
   if (!property) return null;
+
+  const imageUrls = (property.imageUrls ?? []).filter((_, i) => !imgError.has(i));
+  const hasImages = imageUrls.length > 0;
+  const allImageUrls = property.imageUrls ?? [];
+
+  const handleImgError = (originalIndex: number) => {
+    setImgError((prev) => new Set(prev).add(originalIndex));
+  };
 
   const discountRate =
     property.appraisalValue > 0
@@ -126,6 +144,68 @@ export const AuctionInfoPanel = memo(function AuctionInfoPanel({ property, onClo
 
       {/* Content */}
       <ScrollArea className="flex-1">
+        {/* Property Images */}
+        {hasImages && (
+          <div className="border-b border-slate-100">
+            {/* Main Image */}
+            <div className="relative aspect-video w-full overflow-hidden bg-slate-100">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={allImageUrls.filter((_, i) => !imgError.has(i))[selectedImgIdx] ?? ''}
+                alt={property.name}
+                className="h-full w-full object-cover"
+                onError={() => {
+                  // Find the original index for the currently displayed image
+                  const visibleUrls = allImageUrls.map((url, i) => ({ url, i })).filter(({ i }) => !imgError.has(i));
+                  const orig = visibleUrls[selectedImgIdx];
+                  if (orig) handleImgError(orig.i);
+                }}
+              />
+              {imageUrls.length > 1 && (
+                <span className="absolute bottom-2 right-2 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
+                  {selectedImgIdx + 1} / {imageUrls.length}
+                </span>
+              )}
+            </div>
+            {/* Thumbnails */}
+            {imageUrls.length > 1 && (
+              <div
+                ref={thumbRef}
+                className="flex gap-1 overflow-x-auto p-2"
+              >
+                {allImageUrls.map((url, i) =>
+                  imgError.has(i) ? null : (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => {
+                        const visibleIndex = allImageUrls
+                          .slice(0, i + 1)
+                          .filter((_, j) => !imgError.has(j)).length - 1;
+                        setSelectedImgIdx(visibleIndex);
+                      }}
+                      className={cn(
+                        'h-12 w-16 shrink-0 overflow-hidden rounded border-2 transition-colors',
+                        allImageUrls.filter((_, j) => !imgError.has(j))[selectedImgIdx] === url
+                          ? 'border-blue-500'
+                          : 'border-transparent hover:border-slate-300'
+                      )}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={url}
+                        alt=""
+                        className="h-full w-full object-cover"
+                        onError={() => handleImgError(i)}
+                      />
+                    </button>
+                  )
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="space-y-5 p-4">
           {/* Name & Address */}
           <div>

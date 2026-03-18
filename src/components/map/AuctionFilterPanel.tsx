@@ -96,18 +96,25 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
 
+  const bidPriceDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
   // Local state for slider visual feedback (updates immediately, debounces the filter change)
   const [localPriceRange, setLocalPriceRange] = useState(filters.priceRange);
+  const [localBidPriceRange, setLocalBidPriceRange] = useState(filters.bidPriceRange);
   const [localAreaRange, setLocalAreaRange] = useState(filters.areaRange);
 
   // 프리셋 중복선택 — 선택된 프리셋 라벨 추적
   const [selectedPricePresets, setSelectedPricePresets] = useState<Set<string>>(new Set());
+  const [selectedBidPricePresets, setSelectedBidPricePresets] = useState<Set<string>>(new Set());
   const [selectedAreaPresets, setSelectedAreaPresets] = useState<Set<string>>(new Set());
 
   // Sync local slider state when filters change from outside (e.g., preset click or reset)
   useEffect(() => {
     setLocalPriceRange(filters.priceRange);
   }, [filters.priceRange]);
+  useEffect(() => {
+    setLocalBidPriceRange(filters.bidPriceRange);
+  }, [filters.bidPriceRange]);
   useEffect(() => {
     setLocalAreaRange(filters.areaRange);
   }, [filters.areaRange]);
@@ -139,6 +146,10 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
       if (p.appraisalValue > 0) {
         if (p.appraisalValue < filters.priceRange[0] || p.appraisalValue > filters.priceRange[1]) return false;
       }
+      // 최저입찰가 필터
+      if (p.minBidPrice > 0) {
+        if (p.minBidPrice < filters.bidPriceRange[0] || p.minBidPrice > filters.bidPriceRange[1]) return false;
+      }
       // 면적 필터
       if (p.area != null) {
         if (p.area < filters.areaRange[0] || p.area > filters.areaRange[1]) return false;
@@ -150,7 +161,7 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
       }
       return true;
     });
-  }, [viewportProperties, filters.priceRange, filters.areaRange, filters.searchQuery, filters.excludeShareProperties]);
+  }, [viewportProperties, filters.priceRange, filters.bidPriceRange, filters.areaRange, filters.searchQuery, filters.excludeShareProperties]);
 
   // Extract unique disposal methods with counts (가격/면적 필터 반영)
   const disposalMethodCounts = useMemo(() => {
@@ -198,6 +209,18 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
     return { min, max, step, withPrice: prices.length };
   }, [allProperties]);
 
+  // 최저입찰가 통계 (동적 범위)
+  const bidPriceStats = useMemo(() => {
+    const prices = allProperties
+      .map((p) => p.minBidPrice)
+      .filter((v) => v > 0);
+    if (prices.length === 0) return null;
+    const min = Math.min(...prices);
+    const max = Math.max(...prices);
+    const step = max > 1_000_000_000 ? 10_000_000 : max > 100_000_000 ? 1_000_000 : 100_000;
+    return { min, max, step, withPrice: prices.length };
+  }, [allProperties]);
+
   // 면적 통계 (동적 범위)
   const areaStats = useMemo(() => {
     const areas = allProperties
@@ -226,6 +249,21 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
       if (active.size > 0) setSelectedPricePresets(active);
     }
   }, [priceStats]);
+  const bidPricePresetsInitRef = useRef(false);
+  useEffect(() => {
+    if (bidPricePresetsInitRef.current || !bidPriceStats) return;
+    bidPricePresetsInitRef.current = true;
+    const [lo, hi] = filtersRef.current.bidPriceRange;
+    if (lo !== 0 || hi < Number.MAX_SAFE_INTEGER) {
+      const presets = buildPricePresets(bidPriceStats.max);
+      const active = new Set<string>();
+      for (const p of presets) {
+        if (p.range[0] >= lo && p.range[1] <= hi) active.add(p.label);
+      }
+      if (active.size > 0) setSelectedBidPricePresets(active);
+    }
+  }, [bidPriceStats]);
+
   useEffect(() => {
     if (areaPresetsInitRef.current || !areaStats) return;
     areaPresetsInitRef.current = true;
@@ -243,8 +281,10 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
   const handleReset = () => {
     setSearchInput('');
     setLocalPriceRange([0, Number.MAX_SAFE_INTEGER]);
+    setLocalBidPriceRange([0, Number.MAX_SAFE_INTEGER]);
     setLocalAreaRange([0, Number.MAX_SAFE_INTEGER]);
     setSelectedPricePresets(new Set());
+    setSelectedBidPricePresets(new Set());
     setSelectedAreaPresets(new Set());
     onFiltersChange({ ...DEFAULT_FILTERS });
   };
@@ -285,6 +325,39 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
     setLocalPriceRange(combined);
     onFiltersChange({ ...filtersRef.current, priceRange: combined });
   };
+
+  // Debounced bid price slider
+  const handleBidPriceChange = useCallback((value: number[]) => {
+    setLocalBidPriceRange([value[0], value[1]]);
+    setSelectedBidPricePresets(new Set());
+    clearTimeout(bidPriceDebounceRef.current);
+    bidPriceDebounceRef.current = setTimeout(() => {
+      onFiltersChange({ ...filtersRef.current, bidPriceRange: [value[0], value[1]] });
+    }, 300);
+  }, [onFiltersChange]);
+
+  const handleBidPricePresetClick = (label: string, _range: [number, number], allPresets: { label: string; range: [number, number] }[]) => {
+    const next = new Set(selectedBidPricePresets);
+    if (next.has(label)) next.delete(label);
+    else next.add(label);
+    setSelectedBidPricePresets(next);
+
+    if (next.size === 0) {
+      const full: [number, number] = [0, Number.MAX_SAFE_INTEGER];
+      setLocalBidPriceRange(full);
+      onFiltersChange({ ...filtersRef.current, bidPriceRange: full });
+      return;
+    }
+    let lo = Infinity, hi = -Infinity;
+    for (const p of allPresets) {
+      if (next.has(p.label)) { lo = Math.min(lo, p.range[0]); hi = Math.max(hi, p.range[1]); }
+    }
+    const combined: [number, number] = [lo, hi];
+    setLocalBidPriceRange(combined);
+    onFiltersChange({ ...filtersRef.current, bidPriceRange: combined });
+  };
+
+  const isBidPricePresetActive = (label: string) => selectedBidPricePresets.has(label);
 
   // Debounced area slider: update local state immediately, debounce filter change
   const handleAreaChange = useCallback((value: number[]) => {
@@ -463,6 +536,57 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
           ) : (
             <p className="text-[10px] text-slate-400 mb-1.5">
               감정가 정보 없음
+            </p>
+          )}
+        </div>
+
+        {/* Bid price range (최저입찰가 기준) */}
+        <div>
+          <label className="text-xs font-medium text-slate-500 mb-0.5 block">
+            최저입찰가
+          </label>
+          {bidPriceStats ? (
+            <>
+              <p className="text-[10px] text-slate-400 mb-1.5">
+                {formatWon(bidPriceStats.min)} ~ {formatWon(bidPriceStats.max)} ({bidPriceStats.withPrice}건)
+              </p>
+              <div className="flex items-center justify-between text-xs text-slate-600 mb-2">
+                <span>{formatWon(Math.max(localBidPriceRange[0], 0))}</span>
+                <span>{formatWon(Math.min(localBidPriceRange[1], bidPriceStats.max))}</span>
+              </div>
+              <Slider
+                value={[
+                  Math.max(localBidPriceRange[0], 0),
+                  Math.min(localBidPriceRange[1], bidPriceStats.max),
+                ]}
+                min={0}
+                max={bidPriceStats.max}
+                step={bidPriceStats.step}
+                onValueChange={handleBidPriceChange}
+              />
+              {(() => { const presets = buildPricePresets(bidPriceStats.max); return (
+              <div className="mt-2.5 flex flex-wrap gap-1.5">
+                {presets.map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => handleBidPricePresetClick(preset.label, preset.range, presets)}
+                    className={cn(
+                      'rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors border',
+                      isBidPricePresetActive(preset.label)
+                        ? 'border-red-400 bg-red-50 text-red-600'
+                        : 'border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-700'
+                    )}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+              ); })()}
+            </>
+          ) : (
+            <p className="text-[10px] text-slate-400 mb-1.5">
+              입찰가 정보 없음
             </p>
           )}
         </div>

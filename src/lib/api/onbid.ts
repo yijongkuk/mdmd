@@ -24,6 +24,10 @@ interface OnbidItem {
   PBCT_CDTN_NM?: string;
   CLTR_HMPG_ADRS?: string;
   GOODS_NM?: string; // 면적 등 상세 (예: "전 287 ㎡")
+  CLTR_NO?: string | number;
+  CLTR_HSTR_NO?: string | number;
+  PBCT_CDTN_NO?: string | number;
+  CLTR_IMG_FILES?: { CLTR_IMG_FILE?: string | string[] };
 }
 
 /**
@@ -75,6 +79,25 @@ function normalizeOnbidPnu(pnu: string): string {
   return pnu;
 }
 
+function parseImageUrls(item: OnbidItem): string[] {
+  const raw = item.CLTR_IMG_FILES?.CLTR_IMG_FILE;
+  if (!raw) return [];
+  return (Array.isArray(raw) ? raw : [raw]).filter((u) => typeof u === 'string' && u.length > 0);
+}
+
+function buildOnbidUrl(item: OnbidItem): string {
+  // 기존 CLTR_HMPG_ADRS가 있으면 우선 사용
+  if (item.CLTR_HMPG_ADRS) return String(item.CLTR_HMPG_ADRS);
+  // CLTR_NO, CLTR_HSTR_NO, PBCT_CDTN_NO로 상세 페이지 URL 구성
+  const cltrNo = item.CLTR_NO;
+  const hstrNo = item.CLTR_HSTR_NO;
+  const cdtnNo = item.PBCT_CDTN_NO;
+  if (cltrNo && hstrNo && cdtnNo) {
+    return `https://www.onbid.co.kr/op/cta/cltrdtl/collateralRealEstateDetail.do?cltrNo=${cltrNo}&cltrHstrNo=${hstrNo}&pbctCdtnNo=${cdtnNo}`;
+  }
+  return '';
+}
+
 function mapItem(item: OnbidItem): AuctionProperty {
   return {
     id: String(item.CLTR_MNMT_NO ?? ''),
@@ -87,7 +110,8 @@ function mapItem(item: OnbidItem): AuctionProperty {
     bidEndDate: parseOnbidDate(item.PBCT_CLS_DTM),
     itemType: String(item.CTGR_FULL_NM ?? ''),
     status: String(item.PBCT_CDTN_NM ?? ''),
-    onbidUrl: String(item.CLTR_HMPG_ADRS ?? ''),
+    onbidUrl: buildOnbidUrl(item),
+    imageUrls: parseImageUrls(item),
     pnu: item.LDNM_PNU ? normalizeOnbidPnu(String(item.LDNM_PNU)) : undefined,
     area: parseAreaFromGoods(item.GOODS_NM),
   };

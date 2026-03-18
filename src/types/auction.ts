@@ -10,6 +10,7 @@ export interface AuctionProperty {
   itemType: string;
   status: string;
   onbidUrl: string;
+  imageUrls?: string[];        // 온비드 물건 사진 URL
   pnu?: string;                // 필지고유번호
   area?: number;               // ㎡
   officialLandPrice?: number;  // 총 공시지가 (개별공시지가 × 면적)
@@ -42,7 +43,8 @@ export interface AuctionListResponse {
 export type PropertyCategory = 'land' | 'building' | 'all';
 
 export interface AuctionFilters {
-  priceRange: [number, number];
+  priceRange: [number, number];       // 감정가액
+  bidPriceRange: [number, number];    // 최저입찰가
   areaRange: [number, number];   // ㎡
   disposalMethods: string[];
   landTypes: string[];

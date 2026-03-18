@@ -12,6 +12,7 @@ const SOIL_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7일
 
 export const DEFAULT_FILTERS: AuctionFilters = {
   priceRange: [0, Number.MAX_SAFE_INTEGER],
+  bidPriceRange: [0, Number.MAX_SAFE_INTEGER],
   areaRange: [0, Number.MAX_SAFE_INTEGER],
   disposalMethods: [],
   landTypes: [],
