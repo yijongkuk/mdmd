@@ -245,7 +245,7 @@ export function useAuctionProperties(
         // Kakao SDK를 Phase 1 도중 미리 로딩 시작
         const kakaoReadyPromise = waitForKakaoServices();
 
-        // ── Phase 1: OnBid 매물 수집 (동시성 5, 기존 3 → 약 40% 단축) ──
+        // ── Phase 1: OnBid 매물 수집 (동시성 3 — 첫 응답 속도 우선) ──
         let phase1Done = 0;
         store.setProgress({ phase: '매물 목록 수집 중', completed: 0, total: totalJobs, propertyCount: 0 });
         const t0 = performance.now();
@@ -258,7 +258,7 @@ export function useAuctionProperties(
           }).catch(() => ({ properties: [] as AuctionProperty[], totalCount: 0, page, pageSize: 1000 }))
         );
 
-        await runWithConcurrency(phase1Tasks, 5, (r) => {
+        await runWithConcurrency(phase1Tasks, 3, (r) => {
           // API 에러 감지 (OnBid 한도 초과, 키 오류 등)
           if ('apiError' in r && (r as { apiError?: string }).apiError && !firstApiError) {
             firstApiError = (r as { apiError?: string }).apiError!;
