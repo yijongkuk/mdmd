@@ -297,6 +297,15 @@ function MapPageInner() {
     ? Math.round((progress.completed / Math.max(progress.total, 1)) * 100)
     : 0;
 
+  // 로딩 경과 시간 카운터 — 0%일 때 "서버 응답 대기 중" 안내용
+  const [elapsedSec, setElapsedSec] = useState(0);
+  useEffect(() => {
+    if (!auctionsLoading) { setElapsedSec(0); return; }
+    const t0 = Date.now();
+    const id = setInterval(() => setElapsedSec(Math.floor((Date.now() - t0) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [auctionsLoading]);
+
   return (
     <div className="relative h-[calc(100vh-3.5rem)] w-full overflow-hidden">
       <KakaoMap onBoundsChange={handleBoundsChange} onZoomChange={handleZoomChange} initialCenter={mapInitialCenter} initialLevel={mapInitialLevel}>
@@ -358,21 +367,29 @@ function MapPageInner() {
 
               {progress && (
                 <>
-                  {/* 프로그레스 바 */}
+                  {/* 프로그레스 바 — 0%일 때도 pulse 애니메이션으로 활성 상태 표시 */}
                   <div className="w-full rounded-full bg-white/20 h-2 overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-white transition-all duration-300 ease-out"
-                      style={{ width: `${progressPercent}%` }}
-                    />
+                    {progressPercent > 0 ? (
+                      <div
+                        className="h-full rounded-full bg-white transition-all duration-300 ease-out"
+                        style={{ width: `${progressPercent}%` }}
+                      />
+                    ) : (
+                      <div className="h-full w-full animate-pulse rounded-full bg-white/30" />
+                    )}
                   </div>
 
                   {/* 상세 진행 정보 */}
                   <div className="flex flex-col items-center gap-1">
                     <p className="text-sm text-white/80">
-                      {progress.phase} ({progressPercent}%)
+                      {progressPercent === 0
+                        ? '온비드 서버 응답 대기 중...'
+                        : `${progress.phase} (${progressPercent}%)`}
                     </p>
                     <p className="text-xs text-white/50">
-                      {progress.propertyCount.toLocaleString()}건 수집
+                      {progressPercent === 0
+                        ? `${elapsedSec}초 경과 · 첫 응답까지 시간이 걸릴 수 있습니다`
+                        : `${progress.propertyCount.toLocaleString()}건 수집`}
                     </p>
                   </div>
                 </>
