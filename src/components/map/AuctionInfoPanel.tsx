@@ -6,6 +6,7 @@ import { X, ExternalLink, MapPin, Calendar, Tag, Gavel, ArrowRight, Ruler, Bankn
 import type { AuctionProperty } from '@/types/auction';
 import type { SoilInfo } from '@/types/soil';
 import { formatWon, formatDate, formatArea, formatPyeong } from '@/lib/utils/format';
+import { isBuildingCategory } from '@/lib/utils/propertyCategory';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -55,11 +56,12 @@ export const AuctionInfoPanel = memo(function AuctionInfoPanel({ property, onClo
     return () => { cancelled = true; };
   }, [property?.id, property?.lat, property?.lng]);
 
-  // Fetch soil info when PNU is available
+  // Fetch soil info when PNU is available (skip for buildings)
   useEffect(() => {
     setSoilInfo(null);
     const pnu = landDetail?.pnu;
     if (!pnu || pnu.length < 19) return;
+    if (property && isBuildingCategory(property.itemType, property.name)) return;
 
     let cancelled = false;
     setSoilLoading(true);
@@ -73,7 +75,10 @@ export const AuctionInfoPanel = memo(function AuctionInfoPanel({ property, onClo
         if (!cancelled) setSoilLoading(false);
       });
     return () => { cancelled = true; };
-  }, [landDetail?.pnu]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [landDetail?.pnu, property?.itemType, property?.name]);
+
+  const isBuilding = property ? isBuildingCategory(property.itemType, property.name) : false;
 
   if (!property) return null;
 
@@ -252,7 +257,7 @@ export const AuctionInfoPanel = memo(function AuctionInfoPanel({ property, onClo
 
           {/* Land Detail from V-World */}
           <div className="rounded-lg border border-slate-100 bg-blue-50/50 p-3">
-            <p className="text-xs font-semibold text-slate-700 mb-2.5">토지 상세정보</p>
+            <p className="text-xs font-semibold text-slate-700 mb-2.5">{isBuilding ? '부동산 상세정보' : '토지 상세정보'}</p>
             {landLoading ? (
               <div className="flex items-center gap-2 py-2">
                 <div className="h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
@@ -319,8 +324,8 @@ export const AuctionInfoPanel = memo(function AuctionInfoPanel({ property, onClo
             )}
           </div>
 
-          {/* Soil Info */}
-          {landDetail?.pnu && (
+          {/* Soil Info — 건물에는 표시하지 않음 */}
+          {!isBuilding && landDetail?.pnu && (
             <div className="rounded-lg border border-slate-100 bg-amber-50/40 p-3">
               <div className="flex items-center gap-2 mb-2.5">
                 <Layers className="h-4 w-4 text-amber-600" />
@@ -447,7 +452,7 @@ export const AuctionInfoPanel = memo(function AuctionInfoPanel({ property, onClo
         )}
         {property.lat != null && property.lng != null && (
           <Button className="w-full gap-2" onClick={handleStartDesign}>
-            이 땅에 설계 시작
+            {isBuilding ? '이 건물에 설계 시작' : '이 땅에 설계 시작'}
             <ArrowRight className="h-4 w-4" />
           </Button>
         )}

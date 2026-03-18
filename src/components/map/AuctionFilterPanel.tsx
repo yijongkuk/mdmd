@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
 import { X, RotateCcw, Search } from 'lucide-react';
-import type { AuctionProperty, AuctionFilters } from '@/types/auction';
+import type { AuctionProperty, AuctionFilters, PropertyCategory } from '@/types/auction';
 import { DEFAULT_FILTERS } from '@/features/auction';
 import { formatWon } from '@/lib/utils/format';
 import { Slider } from '@/components/ui/slider';
@@ -249,6 +249,12 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
     onFiltersChange({ ...DEFAULT_FILTERS });
   };
 
+  const handleCategoryChange = (cat: PropertyCategory) => {
+    onFiltersChange({ ...filtersRef.current, category: cat, landTypes: [] });
+  };
+
+  const categoryLabel = filters.category === 'land' ? '토지 유형' : filters.category === 'building' ? '건물 유형' : '물건 유형';
+
   // Debounced price slider: update local state immediately, debounce filter change
   const handlePriceChange = useCallback((value: number[]) => {
     setLocalPriceRange([value[0], value[1]]);
@@ -366,6 +372,34 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto p-4 space-y-5">
+        {/* Category segment control */}
+        <div>
+          <label className="text-xs font-medium text-slate-500 mb-1.5 block">
+            물건 카테고리
+          </label>
+          <div className="flex rounded-lg border border-slate-200 overflow-hidden">
+            {([
+              { value: 'land' as PropertyCategory, label: '토지' },
+              { value: 'building' as PropertyCategory, label: '건물' },
+              { value: 'all' as PropertyCategory, label: '전체' },
+            ]).map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => handleCategoryChange(opt.value)}
+                className={cn(
+                  'flex-1 py-1.5 text-xs font-medium transition-colors',
+                  filters.category === opt.value
+                    ? 'bg-red-500 text-white'
+                    : 'bg-white text-slate-600 hover:bg-slate-50'
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Search */}
         <div>
           <label className="text-xs font-medium text-slate-500 mb-1.5 block">
@@ -484,12 +518,12 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
           )}
         </div>
 
-        {/* Disposal methods */}
-        {disposalMethods.length > 0 && (
-          <div>
-            <label className="text-xs font-medium text-slate-500 mb-1.5 block">
-              처분 방식
-            </label>
+        {/* Disposal methods — 항상 렌더링하여 hydration mismatch 방지 */}
+        <div>
+          <label className="text-xs font-medium text-slate-500 mb-1.5 block">
+            처분 방식
+          </label>
+          {disposalMethods.length > 0 ? (
             <div className="space-y-1">
               <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-slate-50">
                 <input
@@ -521,15 +555,17 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
                 </label>
               ))}
             </div>
-          </div>
-        )}
+          ) : (
+            <p className="text-[10px] text-slate-400 px-2 py-1">매물 로딩 후 표시</p>
+          )}
+        </div>
 
-        {/* Land types */}
-        {landTypes.length > 0 && (
-          <div>
-            <label className="text-xs font-medium text-slate-500 mb-1.5 block">
-              토지 유형
-            </label>
+        {/* Land types — 항상 렌더링하여 hydration mismatch 방지 */}
+        <div>
+          <label className="text-xs font-medium text-slate-500 mb-1.5 block">
+            {categoryLabel}
+          </label>
+          {landTypes.length > 0 ? (
             <div className="space-y-1">
               <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-slate-50">
                 <input
@@ -564,8 +600,10 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
                 );
               })}
             </div>
-          </div>
-        )}
+          ) : (
+            <p className="text-[10px] text-slate-400 px-2 py-1">매물 로딩 후 표시</p>
+          )}
+        </div>
 
         {/* 물건 필터 */}
         <div>
@@ -581,15 +619,17 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
             />
             <span className="text-xs text-slate-700">지분 물건 제외</span>
           </label>
-          <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-slate-50">
-            <input
-              type="checkbox"
-              checked={filters.excludeDifficultSoil}
-              onChange={() => onFiltersChange({ ...filters, excludeDifficultSoil: !filters.excludeDifficultSoil })}
-              className="h-3.5 w-3.5 rounded border-slate-300 text-red-500 focus:ring-red-500"
-            />
-            <span className="text-xs text-slate-700">기초공사 어려움 제외</span>
-          </label>
+          {filters.category !== 'building' && (
+            <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-slate-50">
+              <input
+                type="checkbox"
+                checked={filters.excludeDifficultSoil}
+                onChange={() => onFiltersChange({ ...filters, excludeDifficultSoil: !filters.excludeDifficultSoil })}
+                className="h-3.5 w-3.5 rounded border-slate-300 text-red-500 focus:ring-red-500"
+              />
+              <span className="text-xs text-slate-700">기초공사 어려움 제외</span>
+            </label>
+          )}
         </div>
 
       </div>

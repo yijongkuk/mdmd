@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getKamcoAuctionList, getInstitutionalAuctionList } from '@/lib/api/onbid';
 import { geocodeAddress } from '@/lib/api/vworld';
 import type { AuctionProperty } from '@/types/auction';
+import {
+  isLandCategory,
+  isBuildingCategory,
+  isExcludedCategory,
+} from '@/lib/utils/propertyCategory';
 
 /**
  * 수도권 주소 키워드 — 서울/경기/인천 주소에 포함되는 문자열
@@ -15,32 +20,8 @@ const METRO_KEYWORDS = [
   '의왕', '포천', '양평', '여주', '동두천', '과천', '가평', '연천',
 ];
 
-/**
- * 토지 관련 카테고리 키워드 — itemType(CTGR_FULL_NM)에서 필터
- * 건물이 아닌 토지/대지/임야 등 모듈러 건축 가능 물건
- */
-const LAND_KEYWORDS = ['토지', '대지', '임야', '전', '답', '과수원', '목장', '잡종지', '나지'];
-
-/** 건물/비토지 키워드 — 이 키워드가 포함되면 무조건 제외 */
-const BUILDING_KEYWORDS = [
-  '아파트', '건물', '상가', '주택', '빌라', '오피스텔', '빌딩',
-  '사무실', '공장', '창고', '차량', '자동차', '기계', '선박',
-  '항공', '유가증권', '동산', '회원권', '입주권',
-];
-
 function isMetroArea(address: string): boolean {
   return METRO_KEYWORDS.some((kw) => address.includes(kw));
-}
-
-function isLandCategory(itemType: string, name: string): boolean {
-  const combined = `${itemType} ${name}`;
-  // 건물/비토지 키워드가 있으면 제외
-  if (BUILDING_KEYWORDS.some((kw) => combined.includes(kw))) return false;
-  // 토지 키워드가 있으면 포함
-  if (LAND_KEYWORDS.some((kw) => combined.includes(kw))) return true;
-  // itemType이 비어있고 건물 키워드도 없으면 일단 포함
-  if (!itemType) return true;
-  return false;
 }
 
 /**
@@ -135,9 +116,13 @@ export async function GET(request: NextRequest) {
       allProperties = allProperties.filter((p) => isMetroArea(p.address));
     }
 
-    // Filter by land category
+    // Filter by category
     if (category === 'land') {
       allProperties = allProperties.filter((p) => isLandCategory(p.itemType, p.name));
+    } else if (category === 'building') {
+      allProperties = allProperties.filter((p) => isBuildingCategory(p.itemType, p.name));
+    } else if (category === 'all') {
+      allProperties = allProperties.filter((p) => !isExcludedCategory(p.itemType, p.name));
     }
 
     // 좌표 조회 (geocoding only — 공시지가 조회 제거로 대폭 속도 개선)

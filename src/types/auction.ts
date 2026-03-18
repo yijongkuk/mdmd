@@ -39,6 +39,8 @@ export interface AuctionListResponse {
   apiError?: string;
 }
 
+export type PropertyCategory = 'land' | 'building' | 'all';
+
 export interface AuctionFilters {
   priceRange: [number, number];
   areaRange: [number, number];   // ㎡
@@ -47,6 +49,7 @@ export interface AuctionFilters {
   region: 'all' | 'metro';
   searchQuery: string;
   dataSources: string[];
+  category: PropertyCategory;
   excludeLowUnitPrice: boolean;  // 단가 1만원/m² 미만 제외
   excludeDifficultSoil: boolean; // 기초공사 어려움 제외
   excludeShareProperties: boolean; // 지분 물건 제외

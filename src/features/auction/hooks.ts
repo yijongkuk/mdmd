@@ -253,7 +253,7 @@ export function useAuctionProperties(
         let firstApiError: string | null = null;
         const phase1Tasks = allJobs.map(({ region, page }) => () =>
           fetchAuctionProperties(null, {
-            page, size: 1000, source: 'kamco', category: 'land',
+            page, size: 1000, source: 'kamco',
             regionKeyword: region, skipGeocode: true,
           }).catch(() => ({ properties: [] as AuctionProperty[], totalCount: 0, page, pageSize: 1000 }))
         );

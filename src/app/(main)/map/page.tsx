@@ -6,6 +6,7 @@ import { cn } from '@/lib/cn';
 import type { MapBounds } from '@/types/land';
 import type { AuctionProperty, AuctionFilters } from '@/types/auction';
 import { useAuctionProperties, useAuctionStore, DEFAULT_FILTERS } from '@/features/auction';
+import { isLandCategory, isBuildingCategory, isExcludedCategory } from '@/lib/utils/propertyCategory';
 import { useBuilderStore } from '@/features/builder/store';
 import { KakaoMap, getKakaoMapInstance } from '@/components/map/KakaoMap';
 import { AuctionOverlay } from '@/components/map/AuctionOverlay';
@@ -22,6 +23,7 @@ const LOW_UNIT_PRICE_THRESHOLD = 10_000; // 1만원/m²
 
 function hasActiveFilters(filters: AuctionFilters): boolean {
   return (
+    filters.category !== 'land' ||
     filters.priceRange[0] !== 0 ||
     filters.priceRange[1] < Number.MAX_SAFE_INTEGER ||
     filters.areaRange[0] !== 0 ||
@@ -73,6 +75,12 @@ function MapPageInner() {
 
   // Client-side filtering (공통 필터 로직)
   const applyFilters = useCallback((p: AuctionProperty) => {
+    // 카테고리 필터 (폐교는 카테고리 필터 무시)
+    if (p.source !== 'closed_school') {
+      if (filters.category === 'land' && !isLandCategory(p.itemType, p.name)) return false;
+      if (filters.category === 'building' && !isBuildingCategory(p.itemType, p.name)) return false;
+      if (filters.category === 'all' && isExcludedCategory(p.itemType, p.name)) return false;
+    }
     // 저단가 / 비정상 매물 필터
     if (filters.excludeLowUnitPrice && p.appraisalValue > 0) {
       // 면적 있으면 단가 계산: 1만원/m² 미만 제외
@@ -110,15 +118,24 @@ function MapPageInner() {
     return true;
   }, [filters, soilDifficultyMap]);
 
-  // 뷰포트 내 좌표 있는 물건 (필터 미적용) — 필터 패널 카운트용
+  // 뷰포트 내 좌표 있는 물건 (카테고리 필터만 적용) — 필터 패널 카운트용
   const viewportProperties = useMemo(() => {
-    const withCoords = auctionProperties.filter((p) => p.lat != null && p.lng != null);
+    const withCoords = auctionProperties.filter((p) => {
+      if (p.lat == null || p.lng == null) return false;
+      // 카테고리 필터 적용 (폐교는 무시)
+      if (p.source !== 'closed_school') {
+        if (filters.category === 'land' && !isLandCategory(p.itemType, p.name)) return false;
+        if (filters.category === 'building' && !isBuildingCategory(p.itemType, p.name)) return false;
+        if (filters.category === 'all' && isExcludedCategory(p.itemType, p.name)) return false;
+      }
+      return true;
+    });
     if (!bounds) return withCoords;
     return withCoords.filter((p) =>
       p.lat! >= bounds.sw.lat && p.lat! <= bounds.ne.lat &&
       p.lng! >= bounds.sw.lng && p.lng! <= bounds.ne.lng
     );
-  }, [auctionProperties, bounds]);
+  }, [auctionProperties, bounds, filters.category]);
 
   // 지도 마커용 — 좌표 있는 물건만
   const overlayProperties = useMemo(() => {

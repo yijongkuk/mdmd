@@ -18,6 +18,7 @@ export const DEFAULT_FILTERS: AuctionFilters = {
   region: 'all',
   searchQuery: '',
   dataSources: [],
+  category: 'land',
   excludeLowUnitPrice: true,
   excludeDifficultSoil: false,
   excludeShareProperties: true,
