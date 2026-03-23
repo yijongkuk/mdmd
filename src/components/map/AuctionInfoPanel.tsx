@@ -315,12 +315,22 @@ export const AuctionInfoPanel = memo(function AuctionInfoPanel({ property, onClo
                 </div>
               </div>
 
-              {/* Item Type */}
+              {/* Item Type & Zone Type */}
               <div className="flex items-start gap-2">
                 <Tag className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
                 <div>
-                  <p className="text-xs font-medium text-slate-500 mb-1">물건 종류</p>
-                  <Badge variant="outline">{property.itemType}</Badge>
+                  <p className="text-xs font-medium text-slate-500 mb-1">물건 종류 / 용도지역</p>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <Badge variant="outline">{property.itemType}</Badge>
+                    {landDetail?.zoneName && (
+                      <Badge variant="outline" className="text-[11px] border-blue-200 text-blue-700 bg-blue-50">
+                        {landDetail.zoneName}
+                      </Badge>
+                    )}
+                    {!landDetail?.zoneName && landLoading && (
+                      <span className="text-[10px] text-slate-400">조회 중...</span>
+                    )}
+                  </div>
                 </div>
               </div>
 

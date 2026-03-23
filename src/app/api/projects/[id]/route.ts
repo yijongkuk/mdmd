@@ -26,7 +26,7 @@ export async function PUT(
   const { id } = await params;
   const body = await request.json();
 
-  const { name, description, parcelPnu, appraisalValue, minBidPrice, bidStartDate, bidEndDate, totalModules, totalArea, totalCost, placements } =
+  const { name, description, parcelPnu, appraisalValue, minBidPrice, bidStartDate, bidEndDate, parcelArea, maxCoverageRatio, maxFloorAreaRatio, totalModules, totalArea, totalCost, placements } =
     body as {
       name?: string;
       description?: string;
@@ -35,6 +35,9 @@ export async function PUT(
       minBidPrice?: number;
       bidStartDate?: string;
       bidEndDate?: string;
+      parcelArea?: number;
+      maxCoverageRatio?: number;
+      maxFloorAreaRatio?: number;
       totalModules?: number;
       totalArea?: number;
       totalCost?: number;
@@ -58,6 +61,9 @@ export async function PUT(
     ...(minBidPrice !== undefined && { minBidPrice }),
     ...(bidStartDate !== undefined && { bidStartDate }),
     ...(bidEndDate !== undefined && { bidEndDate }),
+    ...(parcelArea !== undefined && { parcelArea }),
+    ...(maxCoverageRatio !== undefined && { maxCoverageRatio }),
+    ...(maxFloorAreaRatio !== undefined && { maxFloorAreaRatio }),
     ...(totalModules !== undefined && { totalModules }),
     ...(totalArea !== undefined && { totalArea }),
     ...(totalCost !== undefined && { totalCost }),

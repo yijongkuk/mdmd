@@ -154,6 +154,9 @@ export default function BuilderPage() {
           minBidPrice,
           bidStartDate: bidStartDate || undefined,
           bidEndDate: bidEndDate || undefined,
+          parcelArea: parcelInfo?.area ?? undefined,
+          maxCoverageRatio: parcelInfo?.regulation?.maxCoverageRatio ?? undefined,
+          maxFloorAreaRatio: parcelInfo?.regulation?.maxFloorAreaRatio ?? undefined,
           ...stats,
           placements: pl.map((p) => ({
             moduleId: p.moduleId,
@@ -179,7 +182,7 @@ export default function BuilderPage() {
     } catch {
       setSaveStatus('error');
     }
-  }, [projectId, effectivePnu, appraisalValue, minBidPrice, bidStartDate, bidEndDate]);
+  }, [projectId, effectivePnu, appraisalValue, minBidPrice, bidStartDate, bidEndDate, parcelInfo]);
 
   // Load project from DB
   useEffect(() => {
@@ -299,12 +302,6 @@ export default function BuilderPage() {
           {parcelInfo && (
             <>
               <span className="font-medium text-blue-900">{parcelInfo.address}</span>
-              <span className="text-blue-700">|</span>
-              <span className="text-blue-700">{parcelInfo.area.toFixed(1)}m²</span>
-              <span className="text-blue-700">|</span>
-              <span className="text-blue-700">
-                건폐율 {parcelInfo.regulation?.maxCoverageRatio}% / 용적률 {parcelInfo.regulation?.maxFloorAreaRatio}%
-              </span>
               {(parcelInfo.officialPrice != null && parcelInfo.officialPrice > 0) && (
                 <>
                   <span className="text-blue-700">|</span>
@@ -439,6 +436,7 @@ export default function BuilderPage() {
             lastSavedAt={lastSavedAt}
             onRename={handleRename}
             parcelPnu={effectivePnu}
+            parcelInfo={parcelInfo}
           />
         </Sidebar>
       </div>

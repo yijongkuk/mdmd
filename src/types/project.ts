@@ -19,6 +19,13 @@ export interface ProjectSummary {
   name: string;
   description?: string;
   parcelPnu?: string;
+  bidStartDate?: string | null;
+  bidEndDate?: string | null;
+  appraisalValue?: number;
+  minBidPrice?: number;
+  parcelArea?: number;
+  maxCoverageRatio?: number;
+  maxFloorAreaRatio?: number;
   totalModules: number;
   totalArea: number;
   totalCost: number;

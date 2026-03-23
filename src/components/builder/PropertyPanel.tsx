@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { Trash2, Box, Layers, Save, Check, Loader2, AlertCircle, Pencil, Mountain } from 'lucide-react';
+import { Trash2, Box, Layers, Save, Check, Loader2, AlertCircle, Pencil, Mountain, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -13,10 +13,12 @@ import { getModuleById } from '@/lib/constants/modules';
 import { getMaterialById } from '@/lib/constants/materials';
 import { MODULE_CATEGORY_LABELS } from '@/types/builder';
 import { FLOOR_LABELS } from '@/lib/constants/grid';
-import { formatWon } from '@/lib/utils/format';
+import { formatWon, formatArea } from '@/lib/utils/format';
 import { MaterialPicker } from './MaterialPicker';
 import { cn } from '@/lib/cn';
 import type { SoilInfo } from '@/types/soil';
+import type { ParcelInfo } from '@/types/land';
+import { ZONE_TYPE_LABELS, ZONE_TYPE_COLORS } from '@/types/land';
 
 function FloorAreaTable() {
   const floorAreas = useBuilderStore((s) => s.floorAreas);
@@ -68,9 +70,10 @@ function FloorAreaTable() {
 interface ProjectSummaryProps {
   onRename?: (name: string) => void;
   parcelPnu?: string | null;
+  parcelInfo?: ParcelInfo | null;
 }
 
-function ProjectSummary({ onRename, parcelPnu }: ProjectSummaryProps) {
+function ProjectSummary({ onRename, parcelPnu, parcelInfo }: ProjectSummaryProps) {
   const placements = useBuilderStore((s) => s.placements);
   const projectName = useBuilderStore((s) => s.projectName);
   const setProjectName = useBuilderStore((s) => s.setProjectName);
@@ -185,6 +188,50 @@ function ProjectSummary({ onRename, parcelPnu }: ProjectSummaryProps) {
           <span className="font-semibold text-slate-900">{formatWon(totalCost)}</span>
         </div>
       </div>
+
+      {/* 대지 정보 */}
+      {parcelInfo && (
+        <>
+          <Separator />
+          <div className="space-y-2.5">
+            <div className="flex items-center gap-1.5">
+              <MapPin className="h-3.5 w-3.5 text-blue-500" />
+              <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                대지 정보
+              </h3>
+            </div>
+            <div className="rounded-lg border border-slate-100 bg-blue-50/40 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-slate-500">대지면적</span>
+                <span className="text-xs font-medium text-slate-800">{formatArea(parcelInfo.area)}</span>
+              </div>
+              {parcelInfo.zoneType && (
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-slate-500">용도지역</span>
+                  <Badge
+                    className="text-[10px] text-white"
+                    style={{ backgroundColor: ZONE_TYPE_COLORS[parcelInfo.zoneType] }}
+                  >
+                    {ZONE_TYPE_LABELS[parcelInfo.zoneType]}
+                  </Badge>
+                </div>
+              )}
+              {parcelInfo.regulation && (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-slate-500">건폐율</span>
+                    <span className="text-xs font-medium text-slate-800">{parcelInfo.regulation.maxCoverageRatio}%</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-slate-500">용적률</span>
+                    <span className="text-xs font-medium text-slate-800">{parcelInfo.regulation.maxFloorAreaRatio}%</span>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
       {/* 층별 건축가능 면적 테이블 */}
       <Separator />
@@ -443,9 +490,10 @@ interface PropertyPanelProps {
   lastSavedAt?: string | null;
   onRename?: (name: string) => void;
   parcelPnu?: string | null;
+  parcelInfo?: ParcelInfo | null;
 }
 
-export function PropertyPanel({ projectId, onSave, saveStatus, lastSavedAt, onRename, parcelPnu }: PropertyPanelProps) {
+export function PropertyPanel({ projectId, onSave, saveStatus, lastSavedAt, onRename, parcelPnu, parcelInfo }: PropertyPanelProps) {
   const router = useRouter();
   const selectedPlacementIds = useBuilderStore((s) => s.selectedPlacementIds);
   const projectName = useBuilderStore((s) => s.projectName);
@@ -486,7 +534,7 @@ export function PropertyPanel({ projectId, onSave, saveStatus, lastSavedAt, onRe
         {hasSelection ? (
           <SelectedModulePanel />
         ) : (
-          <ProjectSummary onRename={onRename} parcelPnu={parcelPnu} />
+          <ProjectSummary onRename={onRename} parcelPnu={parcelPnu} parcelInfo={parcelInfo} />
         )}
       </ScrollArea>
       {/* Sticky bottom: save + delete */}
