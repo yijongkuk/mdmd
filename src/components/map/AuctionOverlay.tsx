@@ -42,6 +42,7 @@ interface AuctionOverlayProps {
   selectedId: string | null;
   onSelect: (id: string) => void;
   zoomLevel?: number;
+  viewedIds?: Set<string>;
 }
 
 // ─── Display mode by zoom (Kakao: 1=closest, 14=farthest) ───
@@ -130,13 +131,22 @@ function clusterHtml(count: number): string {
 function auctionMarkerHtml(
   property: AuctionProperty,
   isSelected: boolean,
+  isViewed: boolean,
 ): string {
   const shortName =
     property.name.length > 12
       ? property.name.slice(0, 12) + '...'
       : property.name;
+
+  // 본 물건: 회색 계열, 안 본 물건: 빨간색
+  const borderColor = isViewed ? '#94a3b8' : '#ef4444';
+  const priceColor = isViewed ? '#64748b' : '#dc2626';
+  const nameColor = isViewed ? '#64748b' : '#1e293b';
+  const badgeBg = isViewed ? '#94a3b8' : '#f97316';
+  const arrowColor = isViewed ? '#94a3b8' : '#ef4444';
+
   const ring = isSelected
-    ? 'box-shadow:0 0 0 3px #ef4444,0 2px 8px rgba(0,0,0,0.25);'
+    ? `box-shadow:0 0 0 3px ${borderColor},0 2px 8px rgba(0,0,0,0.25);`
     : 'box-shadow:0 2px 6px rgba(0,0,0,0.2);';
 
   // 감정가 표시: 항상 감정가 기준, 할인 시 최저입찰가도 표시
@@ -146,23 +156,23 @@ function auctionMarkerHtml(
   return `<div style="display:flex;flex-direction:column;align-items:center;cursor:pointer;">
     <div style="
       background:white;border-radius:8px;padding:4px 8px;
-      border:2px solid #ef4444;${ring}
+      border:2px solid ${borderColor};${ring}
       white-space:nowrap;min-width:80px;text-align:center;
       transition:transform .15s;
     " onmouseover="this.style.transform='scale(1.08)'" onmouseout="this.style.transform='scale(1)'">
-      <div style="font-size:11px;font-weight:700;color:#1e293b;line-height:1.3;">${shortName}</div>
+      <div style="font-size:11px;font-weight:700;color:${nameColor};line-height:1.3;">${shortName}</div>
       ${hasDiscount
         ? `<div style="font-size:9px;color:#94a3b8;text-decoration:line-through;">${formatWon(property.appraisalValue)}</div>
-           <div style="font-size:10px;color:#dc2626;font-weight:600;">${formatWon(property.minBidPrice)}</div>`
-        : `<div style="font-size:10px;color:#dc2626;font-weight:600;margin-top:1px;">${formatWon(displayPrice)}</div>`
+           <div style="font-size:10px;color:${priceColor};font-weight:600;">${formatWon(property.minBidPrice)}</div>`
+        : `<div style="font-size:10px;color:${priceColor};font-weight:600;margin-top:1px;">${formatWon(displayPrice)}</div>`
       }
-      <div style="font-size:8px;font-weight:600;color:white;background:#f97316;
+      <div style="font-size:8px;font-weight:600;color:white;background:${badgeBg};
         border-radius:3px;padding:1px 4px;margin-top:2px;display:inline-block;">${property.disposalMethod || '공매'}</div>
     </div>
     <div style="
       width:0;height:0;
       border-left:6px solid transparent;border-right:6px solid transparent;
-      border-top:8px solid #ef4444;margin-top:-1px;
+      border-top:8px solid ${arrowColor};margin-top:-1px;
     "></div>
   </div>`;
 }
@@ -173,6 +183,7 @@ export const AuctionOverlay = memo(function AuctionOverlay({
   selectedId,
   onSelect,
   zoomLevel = 8,
+  viewedIds = new Set(),
 }: AuctionOverlayProps) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const overlaysRef = useRef<any[]>([]);
@@ -359,8 +370,9 @@ export const AuctionOverlay = memo(function AuctionOverlay({
         visibleWithCoords.push(property);
 
         const isSelected = property.id === selectedIdRef.current;
+        const isViewed = viewedIds.has(property.id);
         const el = document.createElement('div');
-        el.innerHTML = auctionMarkerHtml(property, isSelected);
+        el.innerHTML = auctionMarkerHtml(property, isSelected, isViewed);
         el.style.cursor = 'pointer';
 
         let downX = 0;
@@ -393,7 +405,7 @@ export const AuctionOverlay = memo(function AuctionOverlay({
       markerByIdRef.current.clear();
       elementByIdRef.current.clear();
     };
-  }, [properties, zoomLevel, drawPolygon]);
+  }, [properties, zoomLevel, drawPolygon, viewedIds]);
 
   // Keep properties in ref for selection polygon drawing (avoids effect re-runs)
   const propertiesRef = useRef(properties);
@@ -470,14 +482,15 @@ export const AuctionOverlay = memo(function AuctionOverlay({
 
     elementByIdRef.current.forEach((el, id) => {
       const isSelected = id === selectedId;
+      const isViewed = viewedIds.has(id);
       const property = properties.find((p) => p.id === id);
       if (!property) return;
-      const currentHtml = auctionMarkerHtml(property, isSelected);
+      const currentHtml = auctionMarkerHtml(property, isSelected, isViewed);
       if (el.innerHTML !== currentHtml) {
         el.innerHTML = currentHtml;
       }
     });
-  }, [selectedId, properties, zoomLevel]);
+  }, [selectedId, properties, zoomLevel, viewedIds]);
 
   // ─── SELECTION POLYGON: only re-draws when selectedId changes ───
   useEffect(() => {

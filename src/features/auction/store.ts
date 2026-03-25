@@ -7,7 +7,8 @@ const STORAGE_KEY = 'auction-cache';
 const FILTERS_KEY = 'auction-filters';
 const SOIL_CACHE_KEY = 'soil-difficulty-cache';
 const MAP_TYPE_KEY = 'map-type';
-const STORAGE_TTL = 24 * 60 * 60 * 1000; // 24시간
+const STORAGE_TTL = 3 * 24 * 60 * 60 * 1000; // 3일 (72시간)
+const VIEWED_KEY = 'auction-viewed-ids';
 const SOIL_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7일
 
 export const DEFAULT_FILTERS: AuctionFilters = {
@@ -26,6 +27,19 @@ export const DEFAULT_FILTERS: AuctionFilters = {
 };
 
 type SoilDifficulty = 'good' | 'moderate' | 'difficult';
+
+/** localStorage에서 본 물건 ID 복원 */
+function loadPersistedViewedIds(): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem(VIEWED_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw) as string[];
+      return new Set(arr);
+    }
+  } catch { /* ignore */ }
+  return new Set();
+}
 
 /** localStorage에서 토양 캐시 복원 */
 function loadPersistedSoilCache(): Record<string, SoilDifficulty> {
@@ -85,6 +99,8 @@ interface AuctionState {
   soilDifficultyMap: Record<string, SoilDifficulty>;
   /** 지도 유형 (페이지 이동 후에도 유지) */
   mapType: MapType;
+  /** 이미 본 물건 ID (선택하여 상세 확인한 것) */
+  viewedIds: Set<string>;
 
   /** 캐시에 매물 병합 (새 항목 또는 좌표 업데이트) */
   mergeResults: (properties: AuctionProperty[]) => void;
@@ -100,12 +116,16 @@ interface AuctionState {
   setSoilDifficulty: (pnu: string, level: SoilDifficulty) => void;
   /** 지도 유형 설정 */
   setMapType: (type: MapType) => void;
+  /** 물건을 "본 것"으로 기록 */
+  markViewed: (id: string) => void;
   /** localStorage에 캐시 저장 */
   persistToStorage: () => void;
   /** localStorage에서 캐시 복원 — 성공 시 true */
   hydrateFromStorage: () => boolean;
   /** 캐시 초기화 */
   clearCache: () => void;
+  /** localStorage에서 필터 복원 (mount 후 1회) */
+  hydrateFilters: () => void;
   /** 캐시 초기화 + 에러 리셋 + 재수집 트리거 */
   triggerRetry: () => void;
 }
@@ -119,9 +139,10 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
   progress: null,
   apiError: null,
   retryCounter: 0,
-  filters: loadPersistedFilters(),
+  filters: { ...DEFAULT_FILTERS },  // SSR 일관성 — mount 후 hydrateFilters()로 복원
   soilDifficultyMap: loadPersistedSoilCache(),
   mapType: loadPersistedMapType(),
+  viewedIds: loadPersistedViewedIds(),
 
   mergeResults: (properties) => {
     const { cache } = get();
@@ -163,6 +184,14 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
   setMapType: (type) => {
     set({ mapType: type });
     try { localStorage.setItem(MAP_TYPE_KEY, type); } catch { /* ignore */ }
+  },
+  markViewed: (id) => {
+    const { viewedIds } = get();
+    if (viewedIds.has(id)) return;
+    const next = new Set(viewedIds);
+    next.add(id);
+    set({ viewedIds: next });
+    try { localStorage.setItem(VIEWED_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
   },
 
   persistToStorage: () => {
@@ -231,6 +260,11 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
     get().cache.clear();
     try { localStorage.removeItem(STORAGE_KEY); } catch { /* */ }
     set({ version: get().version + 1, initialFetchDone: false });
+  },
+
+  hydrateFilters: () => {
+    const persisted = loadPersistedFilters();
+    set({ filters: persisted });
   },
 
   triggerRetry: () => {

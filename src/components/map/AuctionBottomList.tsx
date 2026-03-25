@@ -17,6 +17,7 @@ interface AuctionBottomListProps {
   onSelect: (id: string) => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
+  viewedIds?: Set<string>;
 }
 
 export const AuctionBottomList = memo(function AuctionBottomList({
@@ -25,6 +26,7 @@ export const AuctionBottomList = memo(function AuctionBottomList({
   onSelect,
   collapsed,
   onToggleCollapse,
+  viewedIds = new Set(),
 }: AuctionBottomListProps) {
   const [renderCount, setRenderCount] = useState(INITIAL_RENDER_COUNT);
 
@@ -81,6 +83,7 @@ export const AuctionBottomList = memo(function AuctionBottomList({
                 key={property.id}
                 property={property}
                 isSelected={property.id === selectedId}
+                isViewed={viewedIds.has(property.id)}
                 onClick={() => handleCardClick(property)}
               />
             ))}
@@ -105,10 +108,12 @@ export const AuctionBottomList = memo(function AuctionBottomList({
 const AuctionCard = memo(function AuctionCard({
   property,
   isSelected,
+  isViewed,
   onClick,
 }: {
   property: AuctionProperty;
   isSelected: boolean;
+  isViewed: boolean;
   onClick: () => void;
 }) {
   const truncatedName =
@@ -126,42 +131,52 @@ const AuctionCard = memo(function AuctionCard({
         'flex flex-col gap-1 rounded-lg border p-3 text-left transition-all hover:shadow-md',
         isSelected
           ? 'border-red-400 ring-2 ring-red-400 bg-red-50/50'
-          : 'border-slate-200 bg-white hover:border-slate-300'
+          : isViewed
+            ? 'border-slate-200 bg-slate-50 hover:border-slate-300'
+            : 'border-slate-200 bg-white hover:border-slate-300'
       )}
     >
-      <p className="text-sm font-medium text-slate-900 truncate" title={property.name}>
-        {truncatedName}
-      </p>
-      <p className="text-xs text-slate-400 truncate">{property.address}</p>
-      <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-        {property.source === 'closed_school' && (
-          <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
-            폐교
-          </Badge>
+      {/* 본 물건: 좌측 회색 바 */}
+      <div className="flex gap-2">
+        {isViewed && (
+          <div className="w-0.5 shrink-0 self-stretch rounded-full bg-slate-300" />
         )}
-        <Badge variant="warning" className="text-[10px] px-1.5 py-0">
-          {property.disposalMethod || '공매'}
-        </Badge>
-        <Badge variant={isActive ? 'success' : 'secondary'} className="text-[10px] px-1.5 py-0">
-          {property.status}
-        </Badge>
-      </div>
-      {property.appraisalValue > 0 && property.appraisalValue !== property.minBidPrice ? (
-        <div className="mt-1">
-          <div className="flex items-baseline gap-1.5">
-            <p className="text-sm font-bold text-red-600">
-              {formatWon(property.minBidPrice)}
-            </p>
-            <p className="text-[10px] text-slate-400 line-through">
-              {formatWon(property.appraisalValue)}
-            </p>
+        <div className="flex flex-col gap-1 min-w-0 flex-1">
+          <p className={cn('text-sm font-medium truncate', isViewed ? 'text-slate-500' : 'text-slate-900')} title={property.name}>
+            {truncatedName}
+          </p>
+          <p className="text-xs text-slate-400 truncate">{property.address}</p>
+          <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+            {property.source === 'closed_school' && (
+              <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                폐교
+              </Badge>
+            )}
+            <Badge variant="warning" className="text-[10px] px-1.5 py-0">
+              {property.disposalMethod || '공매'}
+            </Badge>
+            <Badge variant={isActive ? 'success' : 'secondary'} className="text-[10px] px-1.5 py-0">
+              {property.status}
+            </Badge>
           </div>
+          {property.appraisalValue > 0 && property.appraisalValue !== property.minBidPrice ? (
+            <div className="mt-1">
+              <div className="flex items-baseline gap-1.5">
+                <p className={cn('text-sm font-bold', isViewed ? 'text-slate-500' : 'text-red-600')}>
+                  {formatWon(property.minBidPrice)}
+                </p>
+                <p className="text-[10px] text-slate-400 line-through">
+                  {formatWon(property.appraisalValue)}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <p className={cn('mt-1 text-sm font-bold', isViewed ? 'text-slate-500' : 'text-red-600')}>
+              {formatWon(property.appraisalValue > 0 ? property.appraisalValue : property.minBidPrice)}
+            </p>
+          )}
         </div>
-      ) : (
-        <p className="mt-1 text-sm font-bold text-red-600">
-          {formatWon(property.appraisalValue > 0 ? property.appraisalValue : property.minBidPrice)}
-        </p>
-      )}
+      </div>
     </button>
   );
 });

@@ -68,8 +68,15 @@ function MapPageInner() {
   const setSoilDifficulty = useAuctionStore((s) => s.setSoilDifficulty);
   const mapType = useAuctionStore((s) => s.mapType);
   const setMapTypeStore = useAuctionStore((s) => s.setMapType);
+  const viewedIds = useAuctionStore((s) => s.viewedIds);
+  const markViewed = useAuctionStore((s) => s.markViewed);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const [listCollapsed, setListCollapsed] = useState(false);
+
+  // localStorage에서 필터 복원 — SSR hydration 이후 1회
+  useEffect(() => {
+    useAuctionStore.getState().hydrateFilters();
+  }, []);
 
   // OnBid 매각/임대 물건 — 실제 공매·매각·임대 유휴지만 표시
   const { properties: auctionProperties, isLoading: auctionsLoading, loadingRegion, progress, apiError, retry } =
@@ -243,7 +250,8 @@ function MapPageInner() {
 
   const handleSelectAuction = useCallback((id: string) => {
     setSelectedAuctionId((prev) => (prev === id ? null : id));
-  }, []);
+    markViewed(id);
+  }, [markViewed]);
 
   const handleCloseAuctionPanel = useCallback(() => {
     setSelectedAuctionId(null);
@@ -445,6 +453,7 @@ function MapPageInner() {
         selectedId={selectedAuctionId}
         onSelect={handleSelectAuction}
         zoomLevel={zoomLevel}
+        viewedIds={viewedIds}
       />
 
       {/* Project overlay — 내 프로젝트 파란 핀 + 필지 채움 */}
@@ -457,6 +466,7 @@ function MapPageInner() {
         onSelect={handleSelectAuction}
         collapsed={listCollapsed}
         onToggleCollapse={() => setListCollapsed((v) => !v)}
+        viewedIds={viewedIds}
       />
 
       {/* Detail panel - auction */}

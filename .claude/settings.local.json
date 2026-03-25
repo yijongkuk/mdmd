@@ -119,7 +119,18 @@
       "WebFetch(domain:www.eiass.go.kr)",
       "WebFetch(domain:qquack.org)",
       "WebFetch(domain:www.eum.go.kr)",
-      "Bash(git revert:*)"
+      "Bash(git revert:*)",
+      "Bash(cd:*)",
+      "WebFetch(domain:www.gimi9.com)",
+      "WebFetch(domain:m.onbid.co.kr)",
+      "Bash(cat:*)",
+      "WebFetch(domain:easylaw.go.kr)",
+      "WebFetch(domain:samwon1.com)",
+      "WebFetch(domain:money-to-money.com)",
+      "WebFetch(domain:wooiljeong.github.io)",
+      "Bash(git checkout:*)",
+      "Bash(git -C \"D:\\\\IRENEHAUS\\\\10_BM\\\\mdmd\\(claude\\)\" diff \"D:\\\\IRENEHAUS\\\\10_BM\\\\mdmd\\(claude\\)/src/features/auction/store.ts\")",
+      "Bash(git -C \"D:\\\\IRENEHAUS\\\\10_BM\\\\mdmd\\(claude\\)\" diff \"D:\\\\IRENEHAUS\\\\10_BM\\\\mdmd\\(claude\\)/src/app/\\(main\\)/map/page.tsx\")"
     ]
   }
 }
