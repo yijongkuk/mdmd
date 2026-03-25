@@ -9,6 +9,24 @@ const ADDRESS_URL = 'http://api.vworld.kr/req/address';
 /** V-World validates Referer header against registered domain */
 const VWORLD_HEADERS = { Referer: 'http://localhost:3000' };
 
+if (!VWORLD_API_KEY) {
+  console.error('[V-World] ❌ VWORLD_API_KEY 환경변수가 설정되지 않았습니다!');
+}
+
+/** V-World API 응답 에러를 상세 로깅 */
+function logVWorldError(fn: string, res: Response | null, json?: unknown) {
+  if (res && !res.ok) {
+    console.error(`[V-World] ${fn} HTTP ${res.status} ${res.statusText}`);
+    return;
+  }
+  if (json) {
+    const resp = (json as Record<string, unknown>)?.response as Record<string, unknown> | undefined;
+    const status = resp?.status;
+    const errMsg = resp?.errMsg ?? resp?.error ?? resp?.message;
+    console.error(`[V-World] ${fn} API 응답 실패 — status: ${status}, error: ${errMsg ?? JSON.stringify(resp ?? json).slice(0, 300)}`);
+  }
+}
+
 /**
  * 건축 가능 지목 코드 (jibun 필드 마지막 글자)
  * 대(대지), 잡(잡종지), 전(전), 답(답), 과(과수원), 목(목장용지), 광(광천지), 공(공장용지)
@@ -123,10 +141,16 @@ export async function getCadastralParcels(
     });
 
     const res = await fetch(`${DATA_URL}?${params.toString()}`, { headers: VWORLD_HEADERS });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      logVWorldError('getCadastralParcels', res);
+      return [];
+    }
 
     const json = await res.json();
-    if (json?.response?.status !== 'OK') return [];
+    if (json?.response?.status !== 'OK') {
+      logVWorldError('getCadastralParcels', null, json);
+      return [];
+    }
     const features = json?.response?.result?.featureCollection?.features;
     if (!Array.isArray(features)) return [];
 
@@ -187,10 +211,16 @@ async function fetchParcelByPnu(pnu: string): Promise<Partial<LandParcel> | null
   });
 
   const res = await fetch(`${DATA_URL}?${params.toString()}`, { headers: VWORLD_HEADERS });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    logVWorldError(`fetchParcelByPnu(${pnu})`, res);
+    return null;
+  }
 
   const json = await res.json();
-  if (json?.response?.status !== 'OK') return null;
+  if (json?.response?.status !== 'OK') {
+    logVWorldError(`fetchParcelByPnu(${pnu})`, null, json);
+    return null;
+  }
   const features = json?.response?.result?.featureCollection?.features;
   if (!Array.isArray(features) || features.length === 0) return null;
 
@@ -270,10 +300,16 @@ export async function getParcelByCoords(
     });
 
     const res = await fetch(`${DATA_URL}?${params.toString()}`, { headers: VWORLD_HEADERS });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      logVWorldError(`getParcelByCoords(${lat},${lng})`, res);
+      return null;
+    }
 
     const json = await res.json();
-    if (json?.response?.status !== 'OK') return null;
+    if (json?.response?.status !== 'OK') {
+      logVWorldError(`getParcelByCoords(${lat},${lng})`, null, json);
+      return null;
+    }
     const features = json?.response?.result?.featureCollection?.features;
     if (!Array.isArray(features) || features.length === 0) return null;
 
@@ -346,10 +382,16 @@ export async function getLandUseZone(lat: number, lng: number): Promise<ZoneType
     });
 
     const res = await fetch(`${DATA_URL}?${params.toString()}`, { headers: VWORLD_HEADERS });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      logVWorldError(`getLandUseZone(${lat},${lng})`, res);
+      return null;
+    }
 
     const json = await res.json();
-    if (json?.response?.status !== 'OK') return null;
+    if (json?.response?.status !== 'OK') {
+      logVWorldError(`getLandUseZone(${lat},${lng})`, null, json);
+      return null;
+    }
     const features = json?.response?.result?.featureCollection?.features;
     if (!Array.isArray(features) || features.length === 0) return null;
 
@@ -385,9 +427,19 @@ export async function geocodeAddress(address: string): Promise<{ lat: number; ln
     });
 
     const res = await fetch(`${ADDRESS_URL}?${params.toString()}`, { headers: VWORLD_HEADERS });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      logVWorldError(`geocodeAddress("${address}")`, res);
+      return null;
+    }
 
     const json = await res.json();
+    if (json?.response?.status !== 'OK') {
+      // geocode는 결과 없음이 정상적일 수 있으므로 NOT_FOUND는 warn 레벨
+      const status = (json?.response as Record<string, unknown>)?.status;
+      if (status !== 'NOT_FOUND') {
+        logVWorldError(`geocodeAddress("${address}")`, null, json);
+      }
+    }
     const result = json?.response?.result;
     if (!result?.point) return null;
 
@@ -440,10 +492,16 @@ export async function getSurroundingBuildings(
     });
 
     const res = await fetch(`${DATA_URL}?${params.toString()}`, { headers: VWORLD_HEADERS });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      logVWorldError('getSurroundingBuildings', res);
+      return [];
+    }
 
     const json = await res.json();
-    if (json?.response?.status !== 'OK') return [];
+    if (json?.response?.status !== 'OK') {
+      logVWorldError('getSurroundingBuildings', null, json);
+      return [];
+    }
     const features = json?.response?.result?.featureCollection?.features;
     if (!Array.isArray(features)) return [];
 
@@ -504,10 +562,16 @@ export async function getSurroundingRoads(
     });
 
     const res = await fetch(`${DATA_URL}?${params.toString()}`, { headers: VWORLD_HEADERS });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      logVWorldError('getSurroundingRoads', res);
+      return [];
+    }
 
     const json = await res.json();
-    if (json?.response?.status !== 'OK') return [];
+    if (json?.response?.status !== 'OK') {
+      logVWorldError('getSurroundingRoads', null, json);
+      return [];
+    }
     const features = json?.response?.result?.featureCollection?.features;
     if (!Array.isArray(features)) return [];
 

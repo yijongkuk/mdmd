@@ -5,6 +5,10 @@ import type { AuctionProperty, AuctionSearchParams } from '@/types/auction';
 const ONBID_API_KEY = process.env.ONBID_API_KEY ?? '';
 const BASE_URL = 'http://openapi.onbid.co.kr/openapi/services/KamcoPblsalThingInquireSvc';
 
+if (!ONBID_API_KEY) {
+  console.error('[OnBid] ❌ ONBID_API_KEY 환경변수가 설정되지 않았습니다!');
+}
+
 const parser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
@@ -216,7 +220,9 @@ export async function getKamcoAuctionList(
     return result;
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    console.error(`OnBid getKamcoAuctionList error: ${errMsg} (region=${regionKey}, page=${page})`);
+    const isAbort = errMsg.includes('aborted') || errMsg.includes('AbortError');
+    const detail = isAbort ? '120초 timeout 초과 — OnBid API 응답 지연' : errMsg;
+    console.error(`[OnBid] getKamcoAuctionList 실패 (region=${regionKey}, page=${page}): ${detail}`);
     return { properties: [], totalCount: 0, apiError: errMsg };
   }
 }
