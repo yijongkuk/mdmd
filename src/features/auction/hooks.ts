@@ -251,19 +251,23 @@ export function useAuctionProperties(
         const t0 = performance.now();
 
         let firstApiError: string | null = null;
-        let hadFetchFailure = false;
         const freshOnbidIds = new Set<string>();
-        const phase1Tasks = allJobs.map(({ region, page }) => () =>
-          fetchAuctionProperties(null, {
-            page, size: 1000, source: 'kamco',
-            regionKeyword: region, skipGeocode: true,
-          }).catch(() => {
-            hadFetchFailure = true;
-            return { properties: [] as AuctionProperty[], totalCount: 0, page, pageSize: 1000 };
-          })
-        );
+        const regionFailed = new Set<string>(); // 요청이 실패/에러난 지역
+        const phase1Tasks = allJobs.map(({ region, page }) => async () => {
+          try {
+            const r = await fetchAuctionProperties(null, {
+              page, size: 1000, source: 'kamco',
+              regionKeyword: region, skipGeocode: true,
+            });
+            if ('apiError' in r && (r as { apiError?: string }).apiError) regionFailed.add(region);
+            return { r, region };
+          } catch {
+            regionFailed.add(region);
+            return { r: { properties: [] as AuctionProperty[], totalCount: 0, page, pageSize: 1000 }, region };
+          }
+        });
 
-        await runWithConcurrency(phase1Tasks, 10, (r) => {
+        await runWithConcurrency(phase1Tasks, 10, ({ r }) => {
           // API 에러 감지 (OnBid 한도 초과, 키 오류 등)
           if ('apiError' in r && (r as { apiError?: string }).apiError && !firstApiError) {
             firstApiError = (r as { apiError?: string }).apiError!;
@@ -283,12 +287,17 @@ export function useAuctionProperties(
 
         console.log(`[perf] Phase 1: ${((performance.now() - t0) / 1000).toFixed(1)}s — ${store.cache.size}건`);
 
-        // 최신 OnBid 목록과 대조하여 사라진(낙찰/취소/마감) 물건을 캐시에서 제거.
-        // 단, 모든 요청이 정상일 때만 — 일부라도 실패 시 멀쩡한 물건을 지우지 않도록 생략(보수적).
-        if (!firstApiError && !hadFetchFailure && freshOnbidIds.size > 0) {
-          store.reconcileOnbid(freshOnbidIds);
-        } else if (firstApiError || hadFetchFailure) {
-          console.log('[auction-cache] 일부 요청 실패 — prune 생략(기존 캐시 유지)');
+        // 최신 OnBid 목록과 대조하여 사라진(낙찰/취소된) 물건을 캐시에서 제거.
+        // 지역별 부분 prune: 요청이 모두 성공한 지역만 정리 → 일부 지역 실패해도
+        // 나머지 지역의 낙찰/취소 물건은 정상적으로 제거됨(예전엔 1개만 실패해도 전체 생략됐음).
+        const succeededRegions = new Set(
+          REGION_PAGES.map((r) => r.region).filter((rg) => !regionFailed.has(rg))
+        );
+        if (succeededRegions.size > 0 && freshOnbidIds.size > 0) {
+          store.reconcileOnbid(freshOnbidIds, succeededRegions);
+        }
+        if (regionFailed.size > 0) {
+          console.log(`[auction-cache] 실패 지역 ${[...regionFailed].join(',')} — 해당 지역은 prune 보류`);
         }
 
         // ── Phase 2: 좌표 변환 (V-World PNU + Kakao 동시 병렬) ──

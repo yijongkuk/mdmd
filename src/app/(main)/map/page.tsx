@@ -89,6 +89,8 @@ function MapPageInner() {
       if (filters.category === 'land' && !isLandCategory(p.itemType, p.name)) return false;
       if (filters.category === 'building' && !isBuildingCategory(p.itemType, p.name)) return false;
       if (filters.category === 'all' && isExcludedCategory(p.itemType, p.name)) return false;
+      // 입찰대기/진행 물건만 — 마감된 회차(인터넷입찰마감)는 제외
+      if (p.status && p.status.includes('마감')) return false;
     }
     // 저단가 / 비정상 매물 필터
     if (filters.excludeLowUnitPrice && p.appraisalValue > 0) {

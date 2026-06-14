@@ -7,9 +7,34 @@ const STORAGE_KEY = 'auction-cache';
 const FILTERS_KEY = 'auction-filters';
 const SOIL_CACHE_KEY = 'soil-difficulty-cache';
 const MAP_TYPE_KEY = 'map-type';
-const STORAGE_TTL = 3 * 24 * 60 * 60 * 1000; // 3일 (72시간)
+const STORAGE_TTL = 24 * 60 * 60 * 1000; // 1일 — 낙찰/취소 신선도 위해 단축(백그라운드 갱신으로 즉시 표시는 유지)
 const VIEWED_KEY = 'auction-viewed-ids';
 const SOIL_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7일
+
+/**
+ * 주소(LDNM_ADRS)로 시도(REGION_PAGES의 지역명) 판별 — reconcileOnbid의 부분 prune용.
+ * OnBid 주소는 정식 명칭("충청북도…")이라 약칭("충북")과 둘 다 매칭.
+ */
+function regionOfAddress(addr: string | undefined): string | null {
+  if (!addr) return null;
+  const a = addr.trimStart();
+  if (a.startsWith('서울')) return '서울';
+  if (a.startsWith('경기')) return '경기';
+  if (a.startsWith('인천')) return '인천';
+  if (a.startsWith('부산')) return '부산';
+  if (a.startsWith('대구')) return '대구';
+  if (a.startsWith('대전')) return '대전';
+  if (a.startsWith('세종')) return '세종';
+  if (a.startsWith('강원')) return '강원';
+  if (a.startsWith('충청북도') || a.startsWith('충북')) return '충북';
+  if (a.startsWith('충청남도') || a.startsWith('충남')) return '충남';
+  if (a.startsWith('전라북도') || a.startsWith('전북')) return '전북';
+  if (a.startsWith('전라남도') || a.startsWith('전남')) return '전남';
+  if (a.startsWith('경상북도') || a.startsWith('경북')) return '경북';
+  if (a.startsWith('경상남도') || a.startsWith('경남')) return '경남';
+  if (a.startsWith('제주')) return '제주';
+  return null; // 울산 등 미수집 지역 → prune 대상 아님(안전)
+}
 
 export const DEFAULT_FILTERS: AuctionFilters = {
   priceRange: [0, Number.MAX_SAFE_INTEGER],
@@ -104,8 +129,8 @@ interface AuctionState {
 
   /** 캐시에 매물 병합 (새 항목 또는 좌표 업데이트) */
   mergeResults: (properties: AuctionProperty[]) => void;
-  /** OnBid 최신 목록과 대조 — 더 이상 목록에 없는(낙찰/취소/마감) OnBid 물건 제거 */
-  reconcileOnbid: (freshIds: Set<string>) => void;
+  /** OnBid 최신 목록과 대조 — 요청 성공 지역에서 사라진(낙찰/취소) OnBid 물건 제거 */
+  reconcileOnbid: (freshIds: Set<string>, succeededRegions: Set<string>) => void;
   /** 로딩 상태 설정 */
   setIsLoading: (v: boolean) => void;
   setLoadingRegion: (v: string) => void;
@@ -171,19 +196,22 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
     }
   },
 
-  reconcileOnbid: (freshIds) => {
+  reconcileOnbid: (freshIds, succeededRegions) => {
     const { cache } = get();
     let removed = 0;
     for (const [id, p] of cache) {
       // OnBid 물건만 대상 — 폐교 등 다른 소스는 건드리지 않음
-      if (p.source === 'onbid' && !freshIds.has(id)) {
+      if (p.source !== 'onbid' || freshIds.has(id)) continue;
+      // 주소로 지역(시도) 판별 — 요청이 성공한 지역의 물건만 제거(부분 실패 안전)
+      const region = regionOfAddress(p.address);
+      if (region && succeededRegions.has(region)) {
         cache.delete(id);
         removed++;
       }
     }
     if (removed > 0) {
       set({ version: get().version + 1 });
-      console.log(`[auction-cache] OnBid 목록에서 사라진 ${removed}건 제거 (낙찰/취소/마감 등)`);
+      console.log(`[auction-cache] OnBid 목록에서 사라진 ${removed}건 제거 (낙찰/취소된 물건)`);
     }
   },
 
