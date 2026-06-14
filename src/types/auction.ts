@@ -16,6 +16,7 @@ export interface AuctionProperty {
   officialLandPrice?: number;  // 총 공시지가 (개별공시지가 × 면적)
   lat?: number;
   lng?: number;
+  isShare?: boolean;           // 지분물건(부분소유) 여부 — GOODS_NM의 "N분의M 지분" 비율로 판정
   source?: 'onbid' | 'closed_school';
   // 폐교 전용 필드
   closedYear?: number;

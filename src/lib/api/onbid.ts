@@ -70,6 +70,24 @@ function parseAreaFromGoods(goodsNm: string | undefined): number | undefined {
 }
 
 /**
+ * GOODS_NM으로 지분물건(부분소유) 여부 판정
+ * 예: "건물 84㎡ 지분(총면적 85㎡ 1분의1 지분), 대 76㎡ 지분(총면적 5,366㎡ 5366분의76 지분)"
+ *  → "{분모}분의{분자}" 비율 중 하나라도 분자<분모면 부분지분 = 지분물건
+ *  ※ "1분의1"(전부소유)은 '지분' 단어가 있어도 지분물건이 아님
+ */
+function isShareFromGoods(goodsNm: string | undefined): boolean {
+  if (!goodsNm || !goodsNm.includes('지분')) return false;
+  const re = /([\d,]+(?:\.\d+)?)\s*분의\s*([\d,]+(?:\.\d+)?)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(goodsNm)) !== null) {
+    const den = parseFloat(m[1].replace(/,/g, ''));
+    const num = parseFloat(m[2].replace(/,/g, ''));
+    if (num > 0 && den > 0 && num < den) return true;
+  }
+  return false;
+}
+
+/**
  * OnBid PNU → V-World PNU 변환
  * OnBid 산구분: 0=일반, 1=산
  * V-World 산구분: 1=일반, 2=산
@@ -120,6 +138,7 @@ function mapItem(item: OnbidItem): AuctionProperty {
     imageUrls: parseImageUrls(item),
     pnu: item.LDNM_PNU ? normalizeOnbidPnu(String(item.LDNM_PNU)) : undefined,
     area: parseAreaFromGoods(item.GOODS_NM),
+    isShare: isShareFromGoods(item.GOODS_NM),
   };
 }
 

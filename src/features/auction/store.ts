@@ -151,15 +151,19 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
     let changed = 0;
     for (const p of properties) {
       if (!p.id) continue;
-      if (!cache.has(p.id)) {
+      const existing = cache.get(p.id);
+      if (!existing) {
         cache.set(p.id, p);
         changed++;
       } else {
-        const existing = cache.get(p.id)!;
-        if (!existing.lat && p.lat) {
-          cache.set(p.id, p);
-          changed++;
-        }
+        // 최신 데이터(상태·가격·지분여부 등)로 갱신하되, 이미 확보한 좌표/PNU는 보존
+        cache.set(p.id, {
+          ...p,
+          lat: existing.lat ?? p.lat,
+          lng: existing.lng ?? p.lng,
+          pnu: existing.pnu ?? p.pnu,
+        });
+        changed++;
       }
     }
     if (changed > 0) {
@@ -235,7 +239,7 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
           bidStartDate: p.bidStartDate, bidEndDate: p.bidEndDate,
           itemType: p.itemType, status: p.status, onbidUrl: p.onbidUrl,
           pnu: p.pnu, area: p.area, officialLandPrice: p.officialLandPrice,
-          lat: p.lat, lng: p.lng, source: p.source,
+          lat: p.lat, lng: p.lng, isShare: p.isShare, source: p.source,
         }] as [string, AuctionProperty]);
         const slimPayload = JSON.stringify({ timestamp: Date.now(), data: slim });
         localStorage.setItem(STORAGE_KEY, slimPayload);
