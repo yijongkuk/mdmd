@@ -31,6 +31,7 @@ interface OnbidItem {
   CLTR_NO?: string | number;
   CLTR_HSTR_NO?: string | number;
   PBCT_CDTN_NO?: string | number;
+  PBCT_CLTR_STAT_NM?: string;     // 물건 입찰상태 (입찰준비중 / 인터넷입찰진행 / 인터넷입찰마감)
   CLTR_IMG_FILES?: { CLTR_IMG_FILE?: string | string[] };
 }
 
@@ -113,7 +114,8 @@ function mapItem(item: OnbidItem): AuctionProperty {
     bidStartDate: parseOnbidDate(item.PBCT_BEGN_DTM),
     bidEndDate: parseOnbidDate(item.PBCT_CLS_DTM),
     itemType: String(item.CTGR_FULL_NM ?? ''),
-    status: String(item.PBCT_CDTN_NM ?? ''),
+    // 실제 응답 필드는 PBCT_CLTR_STAT_NM (PBCT_CDTN_NM은 응답에 존재하지 않음)
+    status: String(item.PBCT_CLTR_STAT_NM ?? item.PBCT_CDTN_NM ?? ''),
     onbidUrl: buildOnbidUrl(item),
     imageUrls: parseImageUrls(item),
     pnu: item.LDNM_PNU ? normalizeOnbidPnu(String(item.LDNM_PNU)) : undefined,

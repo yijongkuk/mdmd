@@ -121,7 +121,7 @@ const AuctionCard = memo(function AuctionCard({
       ? property.name.slice(0, 20) + '...'
       : property.name;
 
-  const isActive = property.status === '진행중';
+  const isActive = property.status.includes('진행');
 
   return (
     <button

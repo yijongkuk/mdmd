@@ -104,6 +104,8 @@ interface AuctionState {
 
   /** 캐시에 매물 병합 (새 항목 또는 좌표 업데이트) */
   mergeResults: (properties: AuctionProperty[]) => void;
+  /** OnBid 최신 목록과 대조 — 더 이상 목록에 없는(낙찰/취소/마감) OnBid 물건 제거 */
+  reconcileOnbid: (freshIds: Set<string>) => void;
   /** 로딩 상태 설정 */
   setIsLoading: (v: boolean) => void;
   setLoadingRegion: (v: string) => void;
@@ -162,6 +164,22 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
     }
     if (changed > 0) {
       set({ version: get().version + 1 });
+    }
+  },
+
+  reconcileOnbid: (freshIds) => {
+    const { cache } = get();
+    let removed = 0;
+    for (const [id, p] of cache) {
+      // OnBid 물건만 대상 — 폐교 등 다른 소스는 건드리지 않음
+      if (p.source === 'onbid' && !freshIds.has(id)) {
+        cache.delete(id);
+        removed++;
+      }
+    }
+    if (removed > 0) {
+      set({ version: get().version + 1 });
+      console.log(`[auction-cache] OnBid 목록에서 사라진 ${removed}건 제거 (낙찰/취소/마감 등)`);
     }
   },
 
@@ -246,8 +264,10 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
         return false;
       }
       const cache = new Map(data);
-      console.log(`[auction-cache] ${cache.size}건 복원 (${(ageMs / 60000).toFixed(0)}분 전 저장)`);
-      set({ cache, version: get().version + 1, initialFetchDone: true });
+      console.log(`[auction-cache] ${cache.size}건 복원 (${(ageMs / 60000).toFixed(0)}분 전 저장) — 백그라운드 갱신 진행`);
+      // initialFetchDone은 설정하지 않음: 캐시는 즉시 표시용이고,
+      // 호출부에서 OnBid 최신 데이터로 백그라운드 갱신(낙찰/취소 제거)을 계속 진행한다.
+      set({ cache, version: get().version + 1 });
       return true;
     } catch (e) {
       console.warn('[auction-cache] 복원 실패:', e);

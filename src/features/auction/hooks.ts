@@ -198,15 +198,15 @@ export function useAuctionProperties(
     const currentState = useAuctionStore.getState();
     if (!enabled || currentState.initialFetchDone || fetchingRef.current) return;
 
-    // localStorage에서 캐시 복원 시도 — 성공하면 API 호출 스킵
-    if (currentState.hydrateFromStorage()) {
-      fetchingRef.current = false;
-      return;
-    }
+    // localStorage 캐시 복원 — 성공하면 즉시 화면에 표시(빠른 첫 화면).
+    // 단, API 호출을 스킵하지 않고 백그라운드로 OnBid 최신 데이터를 받아
+    // 낙찰/취소되어 목록에서 사라진 물건을 제거한다 (stale-while-revalidate).
+    const hydrated = currentState.hydrateFromStorage();
 
     fetchingRef.current = true;
     currentState.setInitialFetchDone(true);
-    currentState.setIsLoading(true);
+    // 캐시가 이미 표시 중이면 풀스크린 로딩 오버레이를 띄우지 않고 조용히 갱신
+    if (!hydrated) currentState.setIsLoading(true);
 
     // 지도 중심 좌표 기준 지역 정렬
     const centerLat = bounds ? (bounds.sw.lat + bounds.ne.lat) / 2 : 37.5385;
@@ -251,11 +251,16 @@ export function useAuctionProperties(
         const t0 = performance.now();
 
         let firstApiError: string | null = null;
+        let hadFetchFailure = false;
+        const freshOnbidIds = new Set<string>();
         const phase1Tasks = allJobs.map(({ region, page }) => () =>
           fetchAuctionProperties(null, {
             page, size: 1000, source: 'kamco',
             regionKeyword: region, skipGeocode: true,
-          }).catch(() => ({ properties: [] as AuctionProperty[], totalCount: 0, page, pageSize: 1000 }))
+          }).catch(() => {
+            hadFetchFailure = true;
+            return { properties: [] as AuctionProperty[], totalCount: 0, page, pageSize: 1000 };
+          })
         );
 
         await runWithConcurrency(phase1Tasks, 10, (r) => {
@@ -265,6 +270,7 @@ export function useAuctionProperties(
             store.setApiError(firstApiError);
           }
           const tagged = r.properties.map((p) => ({ ...p, source: 'onbid' as const }));
+          for (const p of tagged) if (p.id) freshOnbidIds.add(p.id);
           store.mergeResults(tagged);
           phase1Done++;
           store.setProgress({
@@ -276,6 +282,14 @@ export function useAuctionProperties(
         });
 
         console.log(`[perf] Phase 1: ${((performance.now() - t0) / 1000).toFixed(1)}s — ${store.cache.size}건`);
+
+        // 최신 OnBid 목록과 대조하여 사라진(낙찰/취소/마감) 물건을 캐시에서 제거.
+        // 단, 모든 요청이 정상일 때만 — 일부라도 실패 시 멀쩡한 물건을 지우지 않도록 생략(보수적).
+        if (!firstApiError && !hadFetchFailure && freshOnbidIds.size > 0) {
+          store.reconcileOnbid(freshOnbidIds);
+        } else if (firstApiError || hadFetchFailure) {
+          console.log('[auction-cache] 일부 요청 실패 — prune 생략(기존 캐시 유지)');
+        }
 
         // ── Phase 2: 좌표 변환 (V-World PNU + Kakao 동시 병렬) ──
         const toGeocode: { id: string; address: string; pnu?: string }[] = [];

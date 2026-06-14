@@ -105,7 +105,7 @@ export const AuctionInfoPanel = memo(function AuctionInfoPanel({ property, onClo
       ? ((1 - property.minBidPrice / property.appraisalValue) * 100).toFixed(1)
       : null;
 
-  const isActive = property.status === '진행중';
+  const isActive = property.status.includes('진행');
 
   const handleStartDesign = () => {
     if (property.lat == null || property.lng == null) return;
