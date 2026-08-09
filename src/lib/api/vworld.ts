@@ -262,14 +262,14 @@ export async function getParcelByPnu(pnu: string): Promise<Partial<LandParcel> |
     // 1차: 그대로 조회
     let parcel = await fetchParcelByPnu(pnu);
 
-    // 2차: 산구분 변환 fallback (OnBid 0/1 → V-World 1/2 변환이 안 된 경우 대비)
-    if (!parcel && pnu.length === 19) {
-      const mountain = pnu[10];
-      if (mountain === '0') {
-        parcel = await fetchParcelByPnu(pnu.slice(0, 10) + '1' + pnu.slice(11));
-      } else if (mountain === '1') {
-        parcel = await fetchParcelByPnu(pnu.slice(0, 10) + '2' + pnu.slice(11));
-      }
+    // 2차: 산구분 0 → 1 fallback (변환되지 않은 구 캐시 데이터 대비).
+    // V-World에는 산구분 0이 존재하지 않으므로 이 변환은 모호하지 않다.
+    //
+    // 1 → 2 fallback은 의도적으로 하지 않는다. 1은 V-World에서 이미 유효한
+    // '일반' 지번이라, 조회 실패 시 2(산)로 재시도하면 본번-부번이 같은
+    // 전혀 다른 산 필지를 조용히 매칭할 수 있다. 좌표가 틀리느니 못 찾는 편이 낫다.
+    if (!parcel && pnu.length === 19 && pnu[10] === '0') {
+      parcel = await fetchParcelByPnu(pnu.slice(0, 10) + '1' + pnu.slice(11));
     }
 
     if (parcel) {

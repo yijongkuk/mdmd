@@ -48,6 +48,25 @@ interface AuctionOverlayProps {
 // ─── Display mode by zoom (Kakao: 1=closest, 14=farthest) ───
 type DisplayMode = 'cluster' | 'marker';
 
+/**
+ * 마커를 필지 중심으로 재배치할 때 허용할 최대 이동 거리(m).
+ * 이보다 멀면 다른 필지를 잘못 매칭한 것으로 보고 이동하지 않는다.
+ * (재배치가 화면 밖으로 나가버리면 사용자에겐 마커가 "사라진" 것처럼 보인다)
+ */
+const MAX_RELOCATE_M = 1000;
+
+/** 두 좌표 사이 거리(m) — Haversine */
+function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6_371_000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
 function getDisplayMode(zoom: number): DisplayMode {
   // 매물 수가 적으므로 zoom 8(시/군 수준)부터 개별 마커 표시
   return zoom >= 8 ? 'cluster' : 'marker';
@@ -249,14 +268,22 @@ export const AuctionOverlay = memo(function AuctionOverlay({
       if (gen != null && genRef.current !== gen) return [];
 
       // ── Relocate marker to parcel centroid ──
+      // 필지 중심이 원래 위치에서 너무 멀면(= 다른 필지 오매칭 가능성) 이동하지 않는다.
+      // 확대 시 마커가 화면 밖으로 튀어 사라지는 것처럼 보이는 문제를 막는다.
       if (parcelData.centroidLat && parcelData.centroidLng) {
-        const marker = markerByIdRef.current.get(property.id);
-        if (marker) {
-          try {
-            marker.setPosition(
-              new kakao.maps.LatLng(parcelData.centroidLat, parcelData.centroidLng),
-            );
-          } catch { /* CustomOverlay might not support setPosition in some versions */ }
+        const moved = distanceMeters(
+          property.lat, property.lng,
+          parcelData.centroidLat, parcelData.centroidLng,
+        );
+        if (moved <= MAX_RELOCATE_M) {
+          const marker = markerByIdRef.current.get(property.id);
+          if (marker) {
+            try {
+              marker.setPosition(
+                new kakao.maps.LatLng(parcelData.centroidLat, parcelData.centroidLng),
+              );
+            } catch { /* CustomOverlay might not support setPosition in some versions */ }
+          }
         }
       }
 

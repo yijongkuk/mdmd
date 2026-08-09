@@ -124,12 +124,42 @@ function parseNum(raw: string | number | undefined): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
-/** 시도/시군구/읍면동을 하나의 주소 문자열로 결합 */
+/**
+ * OnBid PNU → V-World PNU 변환
+ * OnBid 산구분(11번째 자리): 0=일반, 1=산
+ * V-World 산구분:            1=일반, 2=산
+ * 변환하지 않으면 V-World가 조회에 실패하거나(일반), 같은 본번-부번의
+ * 다른 필지를 잘못 매칭한다(산 → 일반 지번으로 해석).
+ */
+function normalizeOnbidPnu(pnu: string): string {
+  if (pnu.length !== 19) return pnu;
+  const mountain = pnu[10];
+  if (mountain === '0' || mountain === '1') {
+    return pnu.slice(0, 10) + String(Number(mountain) + 1) + pnu.slice(11);
+  }
+  return pnu;
+}
+
+/**
+ * 지오코딩용 주소 생성
+ * 목록 응답의 소재지 필드는 읍면동까지만 제공되어, 그대로 지오코딩하면
+ * 같은 동의 물건이 전부 동 중심점 한 곳에 쌓인다.
+ * 물건명이 "<시도> <시군구> <읍면동> <번지> ..." 형태이므로 번지까지 살려낸다.
+ */
 function buildAddress(item: OnbidRlstItem): string {
-  return [item.lctnSdnm, item.lctnSggnm, item.lctnEmdNm]
+  const base = [item.lctnSdnm, item.lctnSggnm, item.lctnEmdNm]
     .map((v) => (v ?? '').trim())
     .filter(Boolean)
     .join(' ');
+  if (!base) return '';
+
+  const nm = String(item.onbidCltrNm ?? '').trim();
+  if (nm.startsWith(base)) {
+    // 번지(예: "994-6", "산 2-45")까지만 취하고 "제3층 제318호" 등 건물 상세는 버린다
+    const bunji = nm.slice(base.length).trim().match(/^(산\s*)?\d+(-\d+)?/);
+    if (bunji) return `${base} ${bunji[0].replace(/\s+/g, '')}`;
+  }
+  return base;
 }
 
 /** 온비드 물건 상세 페이지 URL */
@@ -160,8 +190,8 @@ function mapItem(item: OnbidRlstItem): AuctionProperty {
     status: String(item.pbctStatNm ?? ''),
     onbidUrl: buildOnbidUrl(item),
     imageUrls: item.thnlImgUrlAdr ? [item.thnlImgUrlAdr] : [],
-    // 차세대 API는 지번PNU를 직접 제공한다 (구 API의 산구분 보정 불필요)
-    pnu: item.ltnoPnu ? String(item.ltnoPnu) : undefined,
+    // 지번PNU는 OnBid 산구분 체계이므로 V-World 체계로 변환해서 넘긴다
+    pnu: item.ltnoPnu ? normalizeOnbidPnu(String(item.ltnoPnu)) : undefined,
     area: landArea ?? bldArea,
     buildingArea: bldArea,
     // 서버가 지분물건 여부를 직접 알려준다 (구 GOODS_NM 정규식 추정 대체)
