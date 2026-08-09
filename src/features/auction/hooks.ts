@@ -164,6 +164,22 @@ export interface LoadingProgress {
   completed: number;
   total: number;
   propertyCount: number;
+  /** 일시적 실패로 재시도 중인 지역 수 — 0이면 표시하지 않음 */
+  retryingCount?: number;
+}
+
+/**
+ * 계속 진행해도 소용없는 치명적 API 오류인지 판정.
+ * 키/권한/한도 문제는 즉시 사용자에게 알려야 하지만,
+ * 타임아웃·일시적 네트워크 오류는 56개 지역 중 일부만 영향을 주므로
+ * 로딩을 중단하거나 전체 화면을 에러로 덮으면 안 된다.
+ */
+function isFatalApiError(msg: string): boolean {
+  // 게이트웨이는 영문 errMsg와 한글 returnAuthMsg를 모두 내려주므로 양쪽을 본다.
+  // "초과"는 타임아웃 메시지("20초 timeout 초과")와 겹치므로 단독으로 쓰지 않는다.
+  return /EXCEEDS|LIMITED_NUMBER|NOT_REGISTERED|SERVICE_KEY|ACCESS_DENIED|DEADLINE|UNREGISTERED/i.test(
+    msg,
+  ) || /한도|등록되지 않은|서비스키|인증키|활용기간|권한이 없/.test(msg);
 }
 
 /** geocode-batch 서버 호출 — 결과를 geocodeResults에 병합 */
@@ -250,42 +266,93 @@ export function useAuctionProperties(
         store.setProgress({ phase: '매물 목록 수집 중', completed: 0, total: totalJobs, propertyCount: 0 });
         const t0 = performance.now();
 
-        let firstApiError: string | null = null;
+        let fatalApiError: string | null = null;
         const freshOnbidIds = new Set<string>();
-        const regionFailed = new Set<string>(); // 요청이 실패/에러난 지역
-        const phase1Tasks = allJobs.map(({ region, page }) => async () => {
+        // 실패한 작업을 "지역:페이지" 단위로 추적한다. 한 지역에 여러 페이지가 있어
+        // 지역 단위로만 관리하면 일부 페이지만 복구돼도 전체 성공으로 오판한다.
+        const jobErrors = new Map<string, string>();
+        // 일시적으로 실패해 재시도할 작업
+        const pendingRetry: { region: string; page: number }[] = [];
+
+        const runJob = async ({ region, page }: { region: string; page: number }) => {
+          const key = `${region}:${page}`;
           try {
             const r = await fetchAuctionProperties(null, {
               page, size: 1000, source: 'kamco',
               regionKeyword: region, skipGeocode: true,
             });
-            if ('apiError' in r && (r as { apiError?: string }).apiError) regionFailed.add(region);
-            return { r, region };
-          } catch {
-            regionFailed.add(region);
-            return { r: { properties: [] as AuctionProperty[], totalCount: 0, page, pageSize: 1000 }, region };
+            const err = (r as { apiError?: string }).apiError;
+            if (err) jobErrors.set(key, err);
+            else jobErrors.delete(key);
+            return { r, region, page, err };
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            jobErrors.set(key, msg);
+            return {
+              r: { properties: [] as AuctionProperty[], totalCount: 0, page, pageSize: 1000 },
+              region,
+              page,
+              err: msg,
+            };
           }
-        });
+        };
 
-        await runWithConcurrency(phase1Tasks, 10, ({ r }) => {
-          // API 에러 감지 (OnBid 한도 초과, 키 오류 등)
-          if ('apiError' in r && (r as { apiError?: string }).apiError && !firstApiError) {
-            firstApiError = (r as { apiError?: string }).apiError!;
-            store.setApiError(firstApiError);
+        const collect = (
+          { r, region, page, err }: { r: { properties: AuctionProperty[] }; region: string; page: number; err?: string },
+          isRetryPass: boolean,
+        ) => {
+          // 치명적 오류(키/권한/한도)만 즉시 사용자에게 알린다.
+          if (err && isFatalApiError(err) && !fatalApiError) {
+            fatalApiError = err;
+            store.setApiError(err);
+          } else if (err && !isRetryPass) {
+            // 일시적 오류 → 로딩을 계속하고 뒤에서 한 번 더 시도
+            pendingRetry.push({ region, page });
           }
           const tagged = r.properties.map((p) => ({ ...p, source: 'onbid' as const }));
           for (const p of tagged) if (p.id) freshOnbidIds.add(p.id);
           store.mergeResults(tagged);
-          phase1Done++;
+          // 재시도 패스는 이미 1패스에서 센 작업이므로 진행률을 다시 올리지 않는다
+          // (올리면 100% → 94% → 100%로 되돌아가 오작동처럼 보인다)
+          if (!isRetryPass) phase1Done++;
           store.setProgress({
-            phase: firstApiError ? `API 오류: ${firstApiError}` : '매물 목록 수집 중',
+            phase: isRetryPass ? '일부 지역 재시도 중' : '매물 목록 수집 중',
             completed: phase1Done,
             total: totalJobs,
             propertyCount: store.cache.size,
+            retryingCount: isRetryPass ? jobErrors.size : pendingRetry.length,
           });
-        });
+        };
+
+        await runWithConcurrency(
+          allJobs.map((job) => () => runJob(job)),
+          10,
+          (res) => collect(res, false),
+        );
+
+        // 일시적으로 실패한 지역만 1회 재시도 — 전체 재로딩보다 훨씬 저렴하다
+        if (pendingRetry.length > 0 && !fatalApiError) {
+          const retryJobs = [...pendingRetry];
+          pendingRetry.length = 0;
+          store.setProgress({
+            phase: '일부 지역 재시도 중',
+            completed: phase1Done,
+            total: totalJobs,
+            propertyCount: store.cache.size,
+            retryingCount: retryJobs.length,
+          });
+          await runWithConcurrency(
+            retryJobs.map((job) => () => runJob(job)),
+            5,
+            // runJob이 성공 시 jobErrors에서 해당 키를 지우므로 별도 해제가 필요 없다
+            (res) => collect(res, true),
+          );
+        }
 
         console.log(`[perf] Phase 1: ${((performance.now() - t0) / 1000).toFixed(1)}s — ${store.cache.size}건`);
+
+        // 재시도까지 끝난 뒤 남은 실패 작업에서 지역 목록을 도출한다
+        const regionFailed = new Set([...jobErrors.keys()].map((k) => k.split(':')[0]));
 
         // 최신 OnBid 목록과 대조하여 사라진(낙찰/취소된) 물건을 캐시에서 제거.
         // 지역별 부분 prune: 요청이 모두 성공한 지역만 정리 → 일부 지역 실패해도

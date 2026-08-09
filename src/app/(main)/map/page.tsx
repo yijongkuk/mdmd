@@ -401,6 +401,13 @@ function MapPageInner() {
                         ? `${elapsedSec}초 경과 · 첫 응답까지 시간이 걸릴 수 있습니다`
                         : `${progress.propertyCount.toLocaleString()}건 수집`}
                     </p>
+                    {/* 일시적으로 지연된 지역 — 자동 재시도되므로 오류로 표시하지 않는다 */}
+                    {progress.retryingCount ? (
+                      <p className="mt-1 flex items-center gap-1.5 text-xs text-amber-300/80">
+                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300/80" />
+                        {progress.retryingCount}개 지역 응답 지연 · 자동 재시도 중
+                      </p>
+                    ) : null}
                   </div>
                 </>
               )}
