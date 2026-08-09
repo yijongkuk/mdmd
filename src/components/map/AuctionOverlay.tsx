@@ -20,6 +20,21 @@ interface ParcelData {
 // ─── Parcel data cache (persists across renders) ─────────────
 const parcelCache = new Map<string, ParcelData>();
 
+/**
+ * 필지 조회 일시 실패 횟수. 네트워크 오류·429·5xx는 캐싱하지 않고 다음 idle에
+ * 재시도하되, 무한 재조회를 막기 위해 이 횟수를 넘으면 "필지 없음"으로 확정한다.
+ */
+const parcelFailCount = new Map<string, number>();
+const MAX_PARCEL_RETRIES = 3;
+
+function noteParcelFailure(cacheKey: string): void {
+  const n = (parcelFailCount.get(cacheKey) ?? 0) + 1;
+  parcelFailCount.set(cacheKey, n);
+  if (n >= MAX_PARCEL_RETRIES) {
+    parcelCache.set(cacheKey, { geometry: null, centroidLat: null, centroidLng: null });
+  }
+}
+
 
 // ─── Concurrent fetch limiter ────────────────────────────────
 async function fetchConcurrent<T>(
@@ -248,7 +263,9 @@ export const AuctionOverlay = memo(function AuctionOverlay({
           const url = `/api/land/parcel-info?${params.toString()}`;
           const res = await fetch(url);
           if (!res.ok) {
-            parcelCache.set(cacheKey, { geometry: null, centroidLat: null, centroidLng: null });
+            // 일시적 실패(429/5xx 등)는 캐싱하지 않는다. 캐싱하면 이후 idle에서
+            // 재조회되지 않아 해당 필지의 지적경계가 세션 내내 안 보인다.
+            noteParcelFailure(cacheKey);
             return [];
           }
           const data = await res.json();
@@ -257,9 +274,11 @@ export const AuctionOverlay = memo(function AuctionOverlay({
             centroidLat: data.centroidLat ?? null,
             centroidLng: data.centroidLng ?? null,
           };
+          // 200 응답은 "필지 없음"도 확정된 결과이므로 그대로 캐싱한다
           parcelCache.set(cacheKey, parcelData);
+          parcelFailCount.delete(cacheKey);
         } catch {
-          parcelCache.set(cacheKey, { geometry: null, centroidLat: null, centroidLng: null });
+          noteParcelFailure(cacheKey);
           return [];
         }
       }
@@ -464,6 +483,18 @@ export const AuctionOverlay = memo(function AuctionOverlay({
       p.lat! >= sw.getLat() && p.lat! <= ne.getLat() &&
       p.lng! >= sw.getLng() && p.lng! <= ne.getLng()
     );
+
+    // 상한을 넘길 때 배열 앞쪽만 자르면 화면 한가운데 물건이 빠질 수 있다.
+    // 지도 중심에서 가까운 순으로 정렬해 보고 있는 필지부터 그린다.
+    const center = map.getCenter();
+    const cLat = center.getLat();
+    const cLng = center.getLng();
+    inView.sort(
+      (a, b) =>
+        (a.lat! - cLat) ** 2 + (a.lng! - cLng) ** 2 -
+        ((b.lat! - cLat) ** 2 + (b.lng! - cLng) ** 2),
+    );
+
     const maxPolygons = currentZoom <= 3 ? 40 : 30;
     fetchConcurrent(
       inView.slice(0, maxPolygons),
