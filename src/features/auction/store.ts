@@ -8,6 +8,20 @@ const FILTERS_KEY = 'auction-filters';
 const SOIL_CACHE_KEY = 'soil-difficulty-cache';
 const MAP_TYPE_KEY = 'map-type';
 const STORAGE_TTL = 24 * 60 * 60 * 1000; // 1일 — 낙찰/취소 신선도 위해 단축(백그라운드 갱신으로 즉시 표시는 유지)
+
+/**
+ * 캐시 스키마 / 좌표 파이프라인 버전.
+ *
+ * 저장된 물건은 좌표를 그대로 재사용한다(mergeResults가 `existing.lat ?? p.lat`로
+ * 보존). 따라서 좌표를 만드는 방식이 바뀌어도 캐시가 살아있는 한 옛 좌표가
+ * 계속 쓰인다. 브라우저 하드 새로고침(Ctrl+Shift+R)은 localStorage를 지우지
+ * 않으므로 사용자가 스스로 해결할 방법도 없다.
+ * 좌표 산출 로직을 바꿀 때 이 값을 올리면 옛 캐시가 자동으로 폐기된다.
+ *
+ * 2: 차세대 온비드 전환 — PNU 산구분 변환 복구, 물건명에서 번지·리(里) 추출,
+ *    본번 0000 PNU 무효 처리, 좌표를 PNU 기준으로 키잉
+ */
+const CACHE_VERSION = 2;
 const VIEWED_KEY = 'auction-viewed-ids';
 const SOIL_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7일
 
@@ -249,7 +263,7 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
       const { cache } = get();
       // 좌표 있는 매물만 저장 (좌표 없는 건 지도에 안 보이고 어차피 재지오코딩 필요)
       const geocoded = Array.from(cache.entries()).filter(([, p]) => p.lat != null);
-      const payload = JSON.stringify({ timestamp: Date.now(), data: geocoded });
+      const payload = JSON.stringify({ version: CACHE_VERSION, timestamp: Date.now(), data: geocoded });
       localStorage.setItem(STORAGE_KEY, payload);
       console.log(`[auction-cache] ${geocoded.length}건 저장 (${(payload.length / 1024).toFixed(0)}KB)`);
     } catch (e) {
@@ -269,7 +283,7 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
           pnu: p.pnu, area: p.area, officialLandPrice: p.officialLandPrice,
           lat: p.lat, lng: p.lng, isShare: p.isShare, source: p.source,
         }] as [string, AuctionProperty]);
-        const slimPayload = JSON.stringify({ timestamp: Date.now(), data: slim });
+        const slimPayload = JSON.stringify({ version: CACHE_VERSION, timestamp: Date.now(), data: slim });
         localStorage.setItem(STORAGE_KEY, slimPayload);
         console.log(`[auction-cache] slim 모드 ${slim.length}건 저장 (${(slimPayload.length / 1024).toFixed(0)}KB)`);
       } catch {
@@ -285,10 +299,17 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
         console.log('[auction-cache] localStorage에 캐시 없음');
         return false;
       }
-      const { timestamp, data } = JSON.parse(raw) as {
+      const { version, timestamp, data } = JSON.parse(raw) as {
+        version?: number;
         timestamp: number;
         data: [string, AuctionProperty][];
       };
+      // 좌표 산출 방식이 바뀌었으면 저장된 좌표를 신뢰할 수 없다
+      if (version !== CACHE_VERSION) {
+        console.log(`[auction-cache] 캐시 버전 불일치 (저장 ${version ?? '없음'} / 현재 ${CACHE_VERSION}) — 폐기하고 재수집`);
+        localStorage.removeItem(STORAGE_KEY);
+        return false;
+      }
       const ageMs = Date.now() - timestamp;
       if (ageMs > STORAGE_TTL) {
         console.log(`[auction-cache] TTL 만료 (${(ageMs / 3600000).toFixed(1)}시간 경과)`);
