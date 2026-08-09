@@ -231,8 +231,10 @@ export const AuctionOverlay = memo(function AuctionOverlay({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const selPolygonsRef = useRef<any[]>([]); // selection-specific polygons
   // Generation counters for aborting stale async polygon fetches
-  const genRef = useRef(0);
-  const polyGenRef = useRef(0); // auto-polygon (idle event) 전용
+  // 폴리곤 세대 카운터 — 화면이 바뀌면 증가시켜 이전 요청의 늦은 응답을 버린다.
+  // (이전에 genRef라는 두 번째 카운터가 있었으나 어디서도 증가하지 않는 죽은
+  //  값이었고, drawPolygon이 그걸 비교해 폴리곤이 전부 중단됐다)
+  const polyGenRef = useRef(0);
   // Track current selectedId in ref to avoid stale closures in drawPolygon
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
@@ -294,8 +296,9 @@ export const AuctionOverlay = memo(function AuctionOverlay({
         }
       }
 
-      // Generation-based abort: if gen was provided and doesn't match current, skip drawing
-      if (gen != null && genRef.current !== gen) return [];
+      // Generation-based abort: if gen was provided and doesn't match current, skip drawing.
+      // 호출자(refreshPolygons)가 넘기는 gen은 polyGenRef 기준이다.
+      if (gen != null && polyGenRef.current !== gen) return [];
 
       // ── Relocate marker to parcel centroid ──
       // 필지 중심이 원래 위치에서 너무 멀면(= 다른 필지 오매칭 가능성) 이동하지 않는다.
@@ -362,7 +365,7 @@ export const AuctionOverlay = memo(function AuctionOverlay({
 
         const drawn: unknown[] = [polygon];
 
-        if (gen != null && genRef.current !== gen) {
+        if (gen != null && polyGenRef.current !== gen) {
           drawn.forEach((o: unknown) => (o as { setMap(m: null): void }).setMap(null));
           return [];
         }
