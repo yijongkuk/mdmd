@@ -255,10 +255,11 @@ export const AuctionOverlay = memo(function AuctionOverlay({
     ): Promise<any[]> => {
       if (property.lat == null || property.lng == null) return [];
 
-      // PNU 있으면 PNU 기반 조회 (정확), 없으면 좌표 기반
-      const cacheKey = property.pnu
-        ? `pnu:${property.pnu}`
-        : `${property.lat.toFixed(6)},${property.lng.toFixed(6)}`;
+      // 캐시 키는 좌표에서 파생하면 안 된다. 조회 결과(필지 중심)로 물건 좌표를
+      // 확정하므로, 좌표 기반 키를 쓰면 키가 매번 바뀌어 캐시가 무효화되고
+      // 재조회 → 좌표 갱신 → 키 변경이 무한 반복되어 경계가 계속 지워진다.
+      // PNU가 있으면 PNU를, 없으면 물건 ID를 쓴다 (둘 다 좌표와 무관하게 고정).
+      const cacheKey = property.pnu ? `pnu:${property.pnu}` : `id:${property.id}`;
 
       // Try cache first
       let parcelData: ParcelData | undefined = parcelCache.get(cacheKey);
@@ -313,8 +314,11 @@ export const AuctionOverlay = memo(function AuctionOverlay({
             } catch { /* CustomOverlay might not support setPosition in some versions */ }
           }
           // 화면상 위치만 바꾸면 store 좌표와 어긋나 뷰포트 판정이 틀어진다.
-          // 좌표 자체를 확정하도록 호출자에 알린다.
-          onRelocate?.(property.id, parcelData.centroidLat, parcelData.centroidLng);
+          // 좌표 자체를 확정하도록 호출자에 알린다. 단 1m 미만 오차로는
+          // 알리지 않는다 — 리렌더가 폴리곤을 지웠다 다시 그리게 만든다.
+          if (moved > 1) {
+            onRelocate?.(property.id, parcelData.centroidLat, parcelData.centroidLng);
+          }
         }
       }
 
