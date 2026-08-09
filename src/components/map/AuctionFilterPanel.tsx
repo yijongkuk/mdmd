@@ -137,10 +137,13 @@ export const AuctionFilterPanel = memo(function AuctionFilterPanel({
         if (p.area != null && p.area > 0 && p.appraisalValue / p.area < 10_000) return false;
         if (!p.officialLandPrice && p.appraisalValue < 1_000_000) return false;
       }
-      // 지분 물건 제외
+      // 지분 물건 제외 — 지도(map/page.tsx)와 동일한 기준을 써야 개수가 맞는다.
+      // 온비드 alcYn 기반 isShare가 기준이며, 물건명 텍스트는 보조 수단이다.
+      // 실측상 지분물건의 96%는 물건명에 "지분" 표기가 없어, 텍스트만 보면
+      // 패널 카운트가 지도에 실제로 표시되는 건수보다 크게 부풀려진다.
       if (filters.excludeShareProperties) {
         const nm = p.name ?? '';
-        if (nm.includes('지분') || nm.includes('공유지분') || nm.includes('持分')) return false;
+        if (p.isShare || nm.includes('지분') || nm.includes('공유지분') || nm.includes('持分')) return false;
       }
       // 가격 필터
       if (p.appraisalValue > 0) {
