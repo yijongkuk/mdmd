@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getKamcoAuctionList, getInstitutionalAuctionList } from '@/lib/api/onbid';
-import { geocodeAddress } from '@/lib/api/vworld';
+import { getKamcoAuctionList } from '@/lib/api/onbid';
+import { geocodeAddress, getParcelByPnu } from '@/lib/api/vworld';
 import type { AuctionProperty } from '@/types/auction';
 import {
   isLandCategory,
@@ -139,6 +139,19 @@ export async function GET(request: NextRequest) {
         const batch = toDo.slice(i, i + BATCH_SIZE);
         const results = await Promise.all(
           batch.map(async (prop) => {
+            // 차세대 온비드 목록은 주소를 읍면동까지만 제공하므로 지오코딩 정밀도가 낮다.
+            // 대신 지번PNU를 제공하므로 필지 중심좌표를 우선 사용한다 (번지 단위 정확도).
+            if (prop.pnu) {
+              const parcel = await getParcelByPnu(prop.pnu);
+              if (parcel?.centroidLat != null && parcel?.centroidLng != null) {
+                return {
+                  ...prop,
+                  lat: parcel.centroidLat,
+                  lng: parcel.centroidLng,
+                  address: parcel.address || prop.address,
+                };
+              }
+            }
             const coords = await geocodeAddress(prop.address);
             if (coords) {
               return { ...prop, lat: coords.lat, lng: coords.lng };

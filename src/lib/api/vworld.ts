@@ -6,8 +6,19 @@ const VWORLD_API_KEY = process.env.VWORLD_API_KEY ?? '';
 const DATA_URL = 'http://api.vworld.kr/req/data';
 const ADDRESS_URL = 'http://api.vworld.kr/req/address';
 
-/** V-World validates Referer header against registered domain */
-const VWORLD_HEADERS = { Referer: 'http://localhost:3000' };
+/**
+ * V-World는 인증키 신청 시 등록한 "서비스URL"과 요청의 Referer를 대조한다.
+ * 배포 환경에서 localhost로 고정 전송하면 키가 유효해도 거부되므로,
+ * Vercel 배포 도메인 → 명시적 환경변수 → 로컬 순으로 자동 선택한다.
+ * 등록 도메인이 다르면 VWORLD_REFERER로 직접 지정할 것.
+ */
+const VWORLD_REFERER =
+  process.env.VWORLD_REFERER ??
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : 'http://localhost:3000');
+
+const VWORLD_HEADERS = { Referer: VWORLD_REFERER };
 
 if (!VWORLD_API_KEY) {
   console.error('[V-World] ❌ VWORLD_API_KEY 환경변수가 설정되지 않았습니다!');

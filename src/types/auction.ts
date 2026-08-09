@@ -1,5 +1,6 @@
 export interface AuctionProperty {
-  id: string;
+  id: string;                  // 물건관리번호(cltrMngNo)
+  pbctCdtnNo?: string;         // 공매조건번호 — 상세조회/상세페이지 링크에 필요
   name: string;
   address: string;
   disposalMethod: string;
@@ -16,7 +17,7 @@ export interface AuctionProperty {
   officialLandPrice?: number;  // 총 공시지가 (개별공시지가 × 면적)
   lat?: number;
   lng?: number;
-  isShare?: boolean;           // 지분물건(부분소유) 여부 — GOODS_NM의 "N분의M 지분" 비율로 판정
+  isShare?: boolean;           // 지분물건(부분소유) 여부 — 온비드 alcYn 필드 기준
   source?: 'onbid' | 'closed_school';
   // 폐교 전용 필드
   closedYear?: number;
@@ -30,7 +31,7 @@ export interface AuctionSearchParams {
   page?: number;
   size?: number;
   disposalMethodCode?: string;
-  regionKeyword?: string; // CLTR_NM 필터 (서울, 경기, 인천 등)
+  regionKeyword?: string; // lctnSdnm(소재지 시도) 필터 (서울, 경기, 인천 등 약칭)
 }
 
 export interface AuctionListResponse {

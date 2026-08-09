@@ -101,7 +101,7 @@ function MapPageInner() {
       // 면적 없거나 공시지가 없는데 감정가 100만원 미만 → 비정상
       if (!p.officialLandPrice && p.appraisalValue < 1_000_000) return false;
     }
-    // 지분 물건 제외 — GOODS_NM 비율로 판정한 isShare가 기준(물건명 텍스트는 보조/구캐시 대비)
+    // 지분 물건 제외 — 온비드 alcYn 기반 isShare가 기준(물건명 텍스트는 보조/구캐시 대비)
     if (filters.excludeShareProperties) {
       const nm = p.name ?? '';
       if (p.isShare || nm.includes('지분') || nm.includes('공유지분') || nm.includes('持分')) return false;

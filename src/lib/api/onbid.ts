@@ -1,49 +1,102 @@
-import { XMLParser } from 'fast-xml-parser';
 import { getCached, setCache, TTL } from './cache';
 import type { AuctionProperty, AuctionSearchParams } from '@/types/auction';
 
 const ONBID_API_KEY = process.env.ONBID_API_KEY ?? '';
-const BASE_URL = 'http://openapi.onbid.co.kr/openapi/services/KamcoPblsalThingInquireSvc';
+
+/**
+ * 차세대 온비드 오픈API (2026-04 전환)
+ *
+ * 구 `openapi.onbid.co.kr/.../KamcoPblsalThingInquireSvc` 계열은 전면 폐기되어
+ * 호스트 자체가 응답하지 않는다. 대체 서비스는 공공데이터포털 게이트웨이(B010003).
+ *   목록: https://www.data.go.kr/data/15157207/openapi.do  (부동산 물건목록 조회서비스)
+ *   상세: https://www.data.go.kr/data/15157247/openapi.do  (부동산 물건상세 조회서비스)
+ * KAMCO 직접 호출 주소(참고): https://open.kamco.or.kr/services/OnbidRlstListSrvc/getRlstCltrList
+ */
+const BASE_URL = 'https://apis.data.go.kr/B010003/OnbidRlstListSrvc2';
+const LIST_OP = 'getRlstCltrList2';
+
+/** 요청 타임아웃 — 구 API(120초)와 달리 게이트웨이는 정상 응답이 빠르다 */
+const REQUEST_TIMEOUT_MS = 20_000;
+
+/**
+ * 재산유형코드(prptDivCd) — 필수 파라미터. 부동산 관련 유형 전체.
+ * 0004(불용품)은 동산이므로 제외한다.
+ */
+const PRPT_DIV_ALL = '0007,0010,0005,0002,0003,0006,0008,0011,0013';
+
+/** 입찰결과구분코드(pbctStatCd) 중 유휴지 탐색 대상에서 제외할 종료 상태 */
+const DEAD_STATUS_CODES = new Set(['0010', '0012']); // 0010 낙찰, 0012 취소
+
+/**
+ * 지역 약칭 → lctnSdnm(소재지지번주소 시도)
+ * hooks.ts의 REGION_PAGES가 약칭('서울','경기'…)을 쓰므로 정식 시도명으로 변환한다.
+ */
+const SIDO_MAP: Record<string, string> = {
+  '서울': '서울특별시',
+  '경기': '경기도',
+  '인천': '인천광역시',
+  '부산': '부산광역시',
+  '대구': '대구광역시',
+  '대전': '대전광역시',
+  '광주': '광주광역시',
+  '울산': '울산광역시',
+  '세종': '세종특별자치시',
+  '강원': '강원특별자치도',
+  '충북': '충청북도',
+  '충남': '충청남도',
+  '전북': '전북특별자치도',
+  '전남': '전라남도',
+  '경북': '경상북도',
+  '경남': '경상남도',
+  '제주': '제주특별자치도',
+};
 
 if (!ONBID_API_KEY) {
   console.error('[OnBid] ❌ ONBID_API_KEY 환경변수가 설정되지 않았습니다!');
 }
 
-const parser = new XMLParser({
-  ignoreAttributes: false,
-  attributeNamePrefix: '@_',
-});
-
-interface OnbidItem {
-  CLTR_NM?: string;
-  LDNM_ADRS?: string;
-  LDNM_PNU?: string;              // 필지고유번호 (PNU)
-  DPSL_MTD_NM?: string;
-  MIN_BID_PRC?: string | number;
-  APSL_ASES_AVG_AMT?: string | number; // 감정평가액(평균)
-  PBCT_BEGN_DTM?: string | number;  // yyyyMMddHHmmss or yyyy-MM-dd HH:mm
-  PBCT_CLS_DTM?: string | number;
-  CLTR_MNMT_NO?: string | number;
-  CTGR_FULL_NM?: string;
-  PBCT_CDTN_NM?: string;
-  CLTR_HMPG_ADRS?: string;
-  GOODS_NM?: string; // 면적 등 상세 (예: "전 287 ㎡")
-  CLTR_NO?: string | number;
-  CLTR_HSTR_NO?: string | number;
-  PBCT_CDTN_NO?: string | number;
-  PBCT_CLTR_STAT_NM?: string;     // 물건 입찰상태 (입찰준비중 / 인터넷입찰진행 / 인터넷입찰마감)
-  CLTR_IMG_FILES?: { CLTR_IMG_FILE?: string | string[] };
+/** 차세대 온비드 부동산 물건목록 응답 항목 (getRlstCltrList2) */
+interface OnbidRlstItem {
+  cltrMngNo?: string | number;        // 물건관리번호 (상세조회 키)
+  pbctCdtnNo?: string | number;       // 공매조건번호 (상세조회 키)
+  onbidCltrno?: string | number;      // 온비드물건번호
+  onbidPbancNo?: string | number;     // 온비드공고번호
+  pbctNo?: string | number;           // 공매번호
+  pbctNsq?: string | number;          // 회차
+  onbidCltrNm?: string;               // 물건명
+  lctnSdnm?: string;                  // 소재지 시도
+  lctnSggnm?: string;                 // 소재지 시군구
+  lctnEmdNm?: string;                 // 소재지 읍면동
+  ltnoPnu?: string;                   // 지번PNU코드
+  rdnmPnu?: string;                   // 도로명PNU코드
+  dspsMthodCd?: string;               // 처분방식코드 (0001 매각, 0002 임대)
+  dspsMthodNm?: string;               // 처분방식명
+  lowstBidPrcIndctCont?: string;      // 최저입찰가격표시내용(원) — "비공개" 가능
+  apslEvlAmt?: string | number;       // 감정평가금액(원)
+  cltrBidBgngDt?: string | number;    // 입찰시작일시 (yyyyMMddHHmm)
+  cltrBidEndDt?: string | number;     // 입찰종료일시 (yyyyMMddHHmm)
+  cltrUsgLclsCtgrNm?: string;         // 용도대분류코드명
+  cltrUsgMclsCtgrNm?: string;         // 용도중분류코드명
+  cltrUsgSclsCtgrNm?: string;         // 용도소분류코드명
+  pbctStatCd?: string;                // 입찰결과구분코드
+  pbctStatNm?: string;                // 입찰결과구분코드명
+  landSqms?: string | number;         // 토지면적(m2)
+  bldSqms?: string | number;          // 건물면적(m2)
+  alcYn?: string;                     // 지분물건여부 (Y/N)
+  usbdNft?: string | number;          // 유찰횟수
+  thnlImgUrlAdr?: string;             // 썸네일 이미지 URL
+  prptDivNm?: string;                 // 재산유형코드명
+  orgNm?: string;                     // 공고기관명
 }
 
 /**
- * OnBid 날짜 문자열 → ISO 형식 변환
- * 입력 예: "20240315", "2024-03-15 10:00", "2024-03-15 10:00:00.0", "", undefined
+ * 온비드 날짜 문자열 → ISO 형식 변환
+ * 차세대 API는 yyyyMMddHHmm(12자리)를 사용한다.
  */
 function parseOnbidDate(raw: string | number | undefined): string {
   if (raw == null || raw === '') return '';
   const s = String(raw).trim();
   if (!s) return '';
-  // yyyyMMdd or yyyyMMddHHmmss
   if (/^\d{8,14}$/.test(s)) {
     const y = s.slice(0, 4);
     const m = s.slice(4, 6);
@@ -52,118 +105,189 @@ function parseOnbidDate(raw: string | number | undefined): string {
     const min = s.slice(10, 12) || '00';
     return `${y}-${m}-${d}T${h}:${min}:00`;
   }
-  // Already has dashes (yyyy-MM-dd ...) — normalize
   const parsed = new Date(s);
   if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
-  return s; // fallback: return as-is
+  return s;
 }
 
-/**
- * GOODS_NM에서 면적(㎡) 파싱
- * 예: "전 287 ㎡" → 287, "대 30.61 ㎡ 지분(...)" → 30.61
- */
-function parseAreaFromGoods(goodsNm: string | undefined): number | undefined {
-  if (!goodsNm) return undefined;
-  const match = goodsNm.match(/([\d,.]+)\s*㎡/);
-  if (match) return parseFloat(match[1].replace(',', ''));
-  return undefined;
+/** "12,345,000원" / "비공개" → 숫자 (파싱 불가 시 0) */
+function parsePrice(raw: string | number | undefined): number {
+  if (raw == null || raw === '') return 0;
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : 0;
+  const digits = raw.replace(/[^\d]/g, '');
+  return digits ? Number(digits) : 0;
 }
 
-/**
- * GOODS_NM으로 지분물건(부분소유) 여부 판정
- * 예: "건물 84㎡ 지분(총면적 85㎡ 1분의1 지분), 대 76㎡ 지분(총면적 5,366㎡ 5366분의76 지분)"
- *  → "{분모}분의{분자}" 비율 중 하나라도 분자<분모면 부분지분 = 지분물건
- *  ※ "1분의1"(전부소유)은 '지분' 단어가 있어도 지분물건이 아님
- */
-function isShareFromGoods(goodsNm: string | undefined): boolean {
-  if (!goodsNm || !goodsNm.includes('지분')) return false;
-  const re = /([\d,]+(?:\.\d+)?)\s*분의\s*([\d,]+(?:\.\d+)?)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(goodsNm)) !== null) {
-    const den = parseFloat(m[1].replace(/,/g, ''));
-    const num = parseFloat(m[2].replace(/,/g, ''));
-    if (num > 0 && den > 0 && num < den) return true;
-  }
-  return false;
+function parseNum(raw: string | number | undefined): number | undefined {
+  if (raw == null || raw === '') return undefined;
+  const n = typeof raw === 'number' ? raw : Number(String(raw).replace(/,/g, ''));
+  return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
-/**
- * OnBid PNU → V-World PNU 변환
- * OnBid 산구분: 0=일반, 1=산
- * V-World 산구분: 1=일반, 2=산
- * 변환: +1
- */
-function normalizeOnbidPnu(pnu: string): string {
-  if (pnu.length !== 19) return pnu;
-  const mountain = pnu[10];
-  if (mountain === '0' || mountain === '1') {
-    return pnu.slice(0, 10) + String(Number(mountain) + 1) + pnu.slice(11);
-  }
-  return pnu;
+/** 시도/시군구/읍면동을 하나의 주소 문자열로 결합 */
+function buildAddress(item: OnbidRlstItem): string {
+  return [item.lctnSdnm, item.lctnSggnm, item.lctnEmdNm]
+    .map((v) => (v ?? '').trim())
+    .filter(Boolean)
+    .join(' ');
 }
 
-function parseImageUrls(item: OnbidItem): string[] {
-  const raw = item.CLTR_IMG_FILES?.CLTR_IMG_FILE;
-  if (!raw) return [];
-  return (Array.isArray(raw) ? raw : [raw]).filter((u) => typeof u === 'string' && u.length > 0);
+/** 온비드 물건 상세 페이지 URL */
+function buildOnbidUrl(item: OnbidRlstItem): string {
+  const cltrNo = item.onbidCltrno ?? item.cltrMngNo;
+  const cdtnNo = item.pbctCdtnNo;
+  if (!cltrNo || !cdtnNo) return '';
+  return `https://www.onbid.co.kr/op/cta/cltrdtl/collateralRealEstateDetail.do?cltrNo=${cltrNo}&pbctCdtnNo=${cdtnNo}`;
 }
 
-function buildOnbidUrl(item: OnbidItem): string {
-  // 기존 CLTR_HMPG_ADRS가 있으면 우선 사용
-  if (item.CLTR_HMPG_ADRS) return String(item.CLTR_HMPG_ADRS);
-  // CLTR_NO, CLTR_HSTR_NO, PBCT_CDTN_NO로 상세 페이지 URL 구성
-  const cltrNo = item.CLTR_NO;
-  const hstrNo = item.CLTR_HSTR_NO;
-  const cdtnNo = item.PBCT_CDTN_NO;
-  if (cltrNo && hstrNo && cdtnNo) {
-    return `https://www.onbid.co.kr/op/cta/cltrdtl/collateralRealEstateDetail.do?cltrNo=${cltrNo}&cltrHstrNo=${hstrNo}&pbctCdtnNo=${cdtnNo}`;
-  }
-  return '';
-}
-
-function mapItem(item: OnbidItem): AuctionProperty {
+function mapItem(item: OnbidRlstItem): AuctionProperty {
+  const landArea = parseNum(item.landSqms);
+  const bldArea = parseNum(item.bldSqms);
   return {
-    id: String(item.CLTR_MNMT_NO ?? ''),
-    name: String(item.CLTR_NM ?? ''),
-    address: String(item.LDNM_ADRS ?? ''),
-    disposalMethod: String(item.DPSL_MTD_NM ?? ''),
-    minBidPrice: Number(item.MIN_BID_PRC) || 0,
-    appraisalValue: Number(item.APSL_ASES_AVG_AMT) || 0,
-    bidStartDate: parseOnbidDate(item.PBCT_BEGN_DTM),
-    bidEndDate: parseOnbidDate(item.PBCT_CLS_DTM),
-    itemType: String(item.CTGR_FULL_NM ?? ''),
-    // 실제 응답 필드는 PBCT_CLTR_STAT_NM (PBCT_CDTN_NM은 응답에 존재하지 않음)
-    status: String(item.PBCT_CLTR_STAT_NM ?? item.PBCT_CDTN_NM ?? ''),
+    id: String(item.cltrMngNo ?? ''),
+    pbctCdtnNo: item.pbctCdtnNo != null ? String(item.pbctCdtnNo) : undefined,
+    // 물건명에 후행 공백이 붙어 오는 경우가 있다
+    name: String(item.onbidCltrNm ?? '').trim(),
+    address: buildAddress(item),
+    disposalMethod: String(item.dspsMthodNm ?? ''),
+    minBidPrice: parsePrice(item.lowstBidPrcIndctCont),
+    appraisalValue: parsePrice(item.apslEvlAmt),
+    bidStartDate: parseOnbidDate(item.cltrBidBgngDt),
+    bidEndDate: parseOnbidDate(item.cltrBidEndDt),
+    // 용도 중/소분류만 사용한다. 대분류는 이 서비스에서 항상 "부동산"이라
+    // 정보량이 없을뿐더러 카테고리 제외 키워드 "동산"에 오탐된다.
+    itemType: [item.cltrUsgMclsCtgrNm, item.cltrUsgSclsCtgrNm].filter(Boolean).join(' '),
+    status: String(item.pbctStatNm ?? ''),
     onbidUrl: buildOnbidUrl(item),
-    imageUrls: parseImageUrls(item),
-    pnu: item.LDNM_PNU ? normalizeOnbidPnu(String(item.LDNM_PNU)) : undefined,
-    area: parseAreaFromGoods(item.GOODS_NM),
-    isShare: isShareFromGoods(item.GOODS_NM),
+    imageUrls: item.thnlImgUrlAdr ? [item.thnlImgUrlAdr] : [],
+    // 차세대 API는 지번PNU를 직접 제공한다 (구 API의 산구분 보정 불필요)
+    pnu: item.ltnoPnu ? String(item.ltnoPnu) : undefined,
+    area: landArea ?? bldArea,
+    buildingArea: bldArea,
+    // 서버가 지분물건 여부를 직접 알려준다 (구 GOODS_NM 정규식 추정 대체)
+    isShare: item.alcYn === 'Y',
   };
 }
 
-function normalizeItems(body: { items?: { item?: OnbidItem | OnbidItem[] } }): OnbidItem[] {
-  const raw = body?.items?.item;
+/** JSON 응답에서 items 배열 추출 (게이트웨이가 단건일 때 객체로 주는 경우 대응) */
+function normalizeItems(body: unknown): OnbidRlstItem[] {
+  const b = body as { items?: { item?: unknown } | unknown[] } | undefined;
+  if (!b?.items) return [];
+  const raw = Array.isArray(b.items)
+    ? b.items
+    : (b.items as { item?: unknown }).item;
   if (!raw) return [];
-  return Array.isArray(raw) ? raw : [raw];
+  return (Array.isArray(raw) ? raw : [raw]) as OnbidRlstItem[];
 }
 
-/** OnBid XML 에러 응답 감지 — 공공 API는 HTTP 200이지만 body에 에러 포함 */
-function checkXmlError(parsed: Record<string, unknown>): string | null {
-  const svcResp = parsed?.OpenAPI_ServiceResponse as Record<string, unknown> | undefined;
+/**
+ * 응답 header/body 추출
+ * 게이트웨이는 { header, body }를 최상위에 둔다 (구 API처럼 response로 감싸지 않음).
+ * 혹시 모를 래핑 변화에 대비해 response 하위도 함께 확인한다.
+ */
+function extractHeader(json: Record<string, unknown>): Record<string, unknown> | undefined {
+  const wrapped = (json?.response as Record<string, unknown> | undefined)?.header;
+  return (wrapped ?? json?.header) as Record<string, unknown> | undefined;
+}
+
+function extractBody(json: Record<string, unknown>): Record<string, unknown> | undefined {
+  const wrapped = (json?.response as Record<string, unknown> | undefined)?.body;
+  return (wrapped ?? json?.body) as Record<string, unknown> | undefined;
+}
+
+/** 조회 결과 0건 — 에러가 아니라 빈 결과로 취급 */
+const NODATA_CODE = '03';
+
+/** 정상 결과코드 */
+function isOkCode(code: string): boolean {
+  return code === '00' || code === '0';
+}
+
+/**
+ * 에러 감지 — 응답이 세 가지 형태로 내려온다.
+ *  1) { OpenAPI_ServiceResponse: { cmmMsgHeader } }  게이트웨이 인증 오류
+ *  2) { result: { resultCode, resultMsg } }          KAMCO 서비스 오류 / 0건
+ *  3) { header: { resultCode: "00" }, body: {...} }  정상
+ * @returns 에러 메시지 | 'NODATA'(0건) | null(정상)
+ */
+function checkApiError(json: Record<string, unknown>): string | null {
+  const svcResp = json?.OpenAPI_ServiceResponse as Record<string, unknown> | undefined;
   if (svcResp?.cmmMsgHeader) {
     const hdr = svcResp.cmmMsgHeader as Record<string, unknown>;
     return String(hdr.returnAuthMsg ?? hdr.errMsg ?? 'UNKNOWN_API_ERROR');
   }
-  const header = (parsed?.response as Record<string, unknown>)?.header as Record<string, unknown> | undefined;
-  if (header) {
-    const code = String(header.resultCode ?? '');
-    // XML 파서가 '00'을 숫자 0으로 변환할 수 있음 → '0'도 정상
-    if (code && code !== '00' && code !== '0') {
-      return String(header.resultMsg ?? `ERROR_CODE_${code}`);
-    }
+
+  for (const src of [json?.result as Record<string, unknown> | undefined, extractHeader(json)]) {
+    if (src?.resultCode == null) continue;
+    const code = String(src.resultCode);
+    if (code === NODATA_CODE) return 'NODATA';
+    if (!isOkCode(code)) return String(src.resultMsg ?? `ERROR_CODE_${code}`);
   }
   return null;
+}
+
+interface RawPage {
+  items: OnbidRlstItem[];
+  totalCount: number;
+  apiError?: string;
+}
+
+async function fetchListPage(
+  params: AuctionSearchParams,
+  pvctTrgtYn: 'Y' | 'N',
+): Promise<RawPage> {
+  const page = params.page ?? 1;
+  const size = params.size ?? 20;
+
+  const query = new URLSearchParams({
+    serviceKey: ONBID_API_KEY,
+    pageNo: String(page),
+    numOfRows: String(size),
+    resultType: 'json',
+    prptDivCd: PRPT_DIV_ALL,
+  });
+  if (params.disposalMethodCode) query.set('dspsMthodCd', params.disposalMethodCode);
+  if (params.regionKeyword) {
+    // 정식 시도명으로 변환 (매핑에 없으면 입력값 그대로 시도)
+    query.set('lctnSdnm', SIDO_MAP[params.regionKeyword] ?? params.regionKeyword);
+  }
+  query.set('pvctTrgtYn', pvctTrgtYn);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${BASE_URL}/${LIST_OP}?${query.toString()}`, {
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      return {
+        items: [],
+        totalCount: 0,
+        apiError: `OnBid HTTP ${res.status} ${res.statusText}`,
+      };
+    }
+
+    const text = await res.text();
+    let json: Record<string, unknown>;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      // 게이트웨이가 XML 에러를 돌려준 경우 원문 일부를 노출
+      return { items: [], totalCount: 0, apiError: `INVALID_JSON: ${text.slice(0, 200)}` };
+    }
+
+    const apiError = checkApiError(json);
+    if (apiError === 'NODATA') return { items: [], totalCount: 0 };
+    if (apiError) return { items: [], totalCount: 0, apiError };
+
+    const body = extractBody(json);
+    return {
+      items: normalizeItems(body),
+      totalCount: Number(body?.totalCount) || 0,
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export async function getKamcoAuctionList(
@@ -177,64 +301,33 @@ export async function getKamcoAuctionList(
   if (cached) return cached;
 
   try {
-    const query = new URLSearchParams({
-      serviceKey: ONBID_API_KEY,
-      pageNo: String(page),
-      numOfRows: String(size),
-    });
-    if (params.disposalMethodCode) {
-      query.set('DPSL_MTD_CD', params.disposalMethodCode);
-    }
-    if (params.regionKeyword) {
-      query.set('CLTR_NM', params.regionKeyword);
-    }
+    // pvctTrgtYn(수의계약가능여부)은 이 서비스의 필수 파라미터다.
+    // Y/N은 상호배타적이므로 두 번 조회해 합치면 해당 조건의 전체 물건이 된다.
+    const [yes, no] = await Promise.all([
+      fetchListPage(params, 'Y'),
+      fetchListPage(params, 'N'),
+    ]);
 
-    // 최대 2회 시도 (1차 실패 시 재시도)
-    let res: Response | null = null;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 120_000);
-      try {
-        res = await fetch(`${BASE_URL}/getKamcoPbctCltrList?${query.toString()}`, {
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-        break; // 성공 시 루프 탈출
-      } catch (retryErr) {
-        clearTimeout(timeoutId);
-        if (attempt === 0) {
-          console.warn(`OnBid retry (region=${regionKey}, page=${page})`);
-          await new Promise((r) => setTimeout(r, 2000)); // 2초 대기 후 재시도
-          continue;
-        }
-        throw retryErr; // 2차도 실패 시 상위 catch로
-      }
-    }
-    if (!res) throw new Error('fetch failed after retries');
-
-    if (!res.ok) {
-      const errMsg = `OnBid HTTP ${res.status} ${res.statusText} (region=${regionKey}, page=${page})`;
-      console.error(errMsg);
-      return { properties: [], totalCount: 0, apiError: errMsg };
+    // 한쪽이 0건인 것은 정상이므로, 양쪽 모두 실패했을 때만 에러로 본다
+    if (yes.apiError && no.apiError) {
+      console.error(`[OnBid] API error: ${yes.apiError} (region=${regionKey}, page=${page})`);
+      return { properties: [], totalCount: 0, apiError: yes.apiError };
     }
 
-    const xml = await res.text();
-    const parsed = parser.parse(xml);
-
-    // 공공 API XML 에러 응답 감지
-    const xmlError = checkXmlError(parsed);
-    if (xmlError) {
-      console.error(`OnBid API error: ${xmlError} (region=${regionKey}, page=${page})`);
-      return { properties: [], totalCount: 0, apiError: xmlError };
+    // 낙찰/취소 물건 제거 + 물건×공매조건 기준 중복 제거
+    const seen = new Set<string>();
+    const live: OnbidRlstItem[] = [];
+    for (const it of [...yes.items, ...no.items]) {
+      if (DEAD_STATUS_CODES.has(String(it.pbctStatCd ?? ''))) continue;
+      const key = `${it.cltrMngNo}:${it.pbctCdtnNo}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      live.push(it);
     }
-
-    const body = parsed?.response?.body;
-    const items = normalizeItems(body);
-    const totalCount = Number(body?.totalCount) || 0;
 
     const result = {
-      properties: items.map(mapItem),
-      totalCount,
+      properties: live.map(mapItem),
+      totalCount: yes.totalCount + no.totalCount,
     };
 
     setCache(cacheKey, result, TTL.AUCTION);
@@ -242,49 +335,10 @@ export async function getKamcoAuctionList(
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     const isAbort = errMsg.includes('aborted') || errMsg.includes('AbortError');
-    const detail = isAbort ? '120초 timeout 초과 — OnBid API 응답 지연' : errMsg;
+    const detail = isAbort
+      ? `${REQUEST_TIMEOUT_MS / 1000}초 timeout 초과 — OnBid API 응답 지연`
+      : errMsg;
     console.error(`[OnBid] getKamcoAuctionList 실패 (region=${regionKey}, page=${page}): ${detail}`);
-    return { properties: [], totalCount: 0, apiError: errMsg };
-  }
-}
-
-export async function getInstitutionalAuctionList(
-  params: AuctionSearchParams,
-): Promise<{ properties: AuctionProperty[]; totalCount: number }> {
-  const page = params.page ?? 1;
-  const size = params.size ?? 20;
-  const cacheKey = `auction:inst:${page}:${size}:${params.disposalMethodCode ?? ''}`;
-  const cached = getCached<{ properties: AuctionProperty[]; totalCount: number }>(cacheKey);
-  if (cached) return cached;
-
-  try {
-    const query = new URLSearchParams({
-      serviceKey: ONBID_API_KEY,
-      pageNo: String(page),
-      numOfRows: String(size),
-    });
-    if (params.disposalMethodCode) {
-      query.set('DPSL_MTD_CD', params.disposalMethodCode);
-    }
-
-    const res = await fetch(`${BASE_URL}/getUtlinsttPbctCltrList?${query.toString()}`);
-    if (!res.ok) return { properties: [], totalCount: 0 };
-
-    const xml = await res.text();
-    const parsed = parser.parse(xml);
-    const body = parsed?.response?.body;
-    const items = normalizeItems(body);
-    const totalCount = Number(body?.totalCount) || 0;
-
-    const result = {
-      properties: items.map(mapItem),
-      totalCount,
-    };
-
-    setCache(cacheKey, result, TTL.AUCTION);
-    return result;
-  } catch (err) {
-    console.error('OnBid getInstitutionalAuctionList error:', err);
-    return { properties: [], totalCount: 0 };
+    return { properties: [], totalCount: 0, apiError: detail };
   }
 }

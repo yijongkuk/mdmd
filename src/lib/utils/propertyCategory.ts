@@ -12,9 +12,18 @@ export const EXCLUDE_KEYWORDS = [
   '차량', '자동차', '기계', '선박', '항공', '유가증권', '동산', '회원권', '입주권',
 ];
 
+/**
+ * 판별용 문자열 정규화
+ * 차세대 온비드의 용도대분류명은 "부동산"인데, EXCLUDE_KEYWORDS의 "동산"에
+ * 부분일치해 모든 부동산이 제외되는 오탐이 발생한다. 매칭 전에 제거한다.
+ */
+function normalizeForMatch(itemType: string, name: string): string {
+  return `${itemType} ${name}`.replace(/부동산/g, '');
+}
+
 /** 토지 카테고리 판별 */
 export function isLandCategory(itemType: string, name: string): boolean {
-  const combined = `${itemType} ${name}`;
+  const combined = normalizeForMatch(itemType, name);
   if (BUILDING_ONLY_KEYWORDS.some((kw) => combined.includes(kw))) return false;
   if (EXCLUDE_KEYWORDS.some((kw) => combined.includes(kw))) return false;
   if (LAND_KEYWORDS.some((kw) => combined.includes(kw))) return true;
@@ -24,13 +33,13 @@ export function isLandCategory(itemType: string, name: string): boolean {
 
 /** 건물 카테고리 판별 */
 export function isBuildingCategory(itemType: string, name: string): boolean {
-  const combined = `${itemType} ${name}`;
+  const combined = normalizeForMatch(itemType, name);
   if (EXCLUDE_KEYWORDS.some((kw) => combined.includes(kw))) return false;
   return BUILDING_ONLY_KEYWORDS.some((kw) => combined.includes(kw));
 }
 
 /** 비부동산 동산 판별 (항상 제외 대상) */
 export function isExcludedCategory(itemType: string, name: string): boolean {
-  const combined = `${itemType} ${name}`;
+  const combined = normalizeForMatch(itemType, name);
   return EXCLUDE_KEYWORDS.some((kw) => combined.includes(kw));
 }
