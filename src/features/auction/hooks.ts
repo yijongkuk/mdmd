@@ -182,10 +182,11 @@ function isFatalApiError(msg: string): boolean {
   ) || /한도|등록되지 않은|서비스키|인증키|활용기간|권한이 없/.test(msg);
 }
 
-/** geocode-batch 서버 호출 — 결과를 geocodeResults에 병합 */
+/** geocode-batch 서버 호출 — 주소별/PNU별 결과를 각각 병합 */
 async function fetchGeocodeBatch(
   items: { address: string; pnu?: string }[],
   geocodeResults: Record<string, { lat: number; lng: number }>,
+  pnuResults: Record<string, { lat: number; lng: number }>,
 ): Promise<void> {
   try {
     const res = await fetch('/api/geocode-batch', {
@@ -196,6 +197,7 @@ async function fetchGeocodeBatch(
     if (res.ok) {
       const data = await res.json();
       if (data.results) Object.assign(geocodeResults, data.results);
+      if (data.pnuResults) Object.assign(pnuResults, data.pnuResults);
     }
   } catch { /* skip failed batch */ }
 }
@@ -377,13 +379,20 @@ export function useAuctionProperties(
 
         if (toGeocode.length > 0) {
           const geocodeResults: Record<string, { lat: number; lng: number }> = {};
+          // PNU별 정확 좌표 — 주소는 여러 필지가 공유할 수 있으므로 PNU가 있으면 이쪽을 쓴다
+          const pnuResults: Record<string, { lat: number; lng: number }> = {};
           const kakaoPnuMap: Record<string, string> = {};
 
-          // 주소별 중복 제거
-          const uniqueByAddr = [...new Map(toGeocode.map((t) => [t.address, t])).values()];
-          const withPnu = uniqueByAddr.filter((t) => t.pnu);
-          const withoutPnu = uniqueByAddr.filter((t) => !t.pnu);
-          const totalToGeocode = uniqueByAddr.length;
+          // 중복 제거 기준을 나눈다: PNU가 있으면 PNU로, 없으면 주소로.
+          // 전부 주소로 묶으면 같은 주소의 서로 다른 필지가 한 건으로 합쳐져
+          // 마커가 남의 필지 좌표를 받는다.
+          const withPnu = [...new Map(
+            toGeocode.filter((t) => t.pnu).map((t) => [t.pnu!, t]),
+          ).values()];
+          const withoutPnu = [...new Map(
+            toGeocode.filter((t) => !t.pnu).map((t) => [t.address, t]),
+          ).values()];
+          const totalToGeocode = withPnu.length + withoutPnu.length;
           let geocodeDone = 0;
 
           store.setProgress({
@@ -400,8 +409,10 @@ export function useAuctionProperties(
             // 2a: PNU → V-World 필지 경계 (배치 2개 동시, 기존 순차 → 약 50% 단축)
             (async () => {
               if (withPnu.length === 0) return;
+              // PNU 기준으로 중복 제거한다. 주소 기준으로 묶으면 같은 주소를 가진
+              // 서로 다른 필지가 하나로 합쳐져 전부 같은 좌표를 받게 된다.
               const pnuItems = [...new Map(
-                withPnu.map((t) => [t.address, { address: t.address, pnu: t.pnu }]),
+                withPnu.map((t) => [t.pnu!, { address: t.address, pnu: t.pnu }]),
               ).values()];
 
               const batchSize = 50;
@@ -413,7 +424,7 @@ export function useAuctionProperties(
               // 배치 2개씩 동시 실행 (V-World 부하 제한)
               await runWithConcurrency(
                 batches.map((chunk) => async () => {
-                  await fetchGeocodeBatch(chunk, geocodeResults);
+                  await fetchGeocodeBatch(chunk, geocodeResults, pnuResults);
                   geocodeDone += chunk.length;
                   store.setProgress({
                     phase: '좌표 변환 중',
@@ -455,7 +466,7 @@ export function useAuctionProperties(
           ]);
 
           // V-World PNU 실패 → Kakao fallback (기존엔 누락되던 항목)
-          const vworldFailed = withPnu.filter((t) => !geocodeResults[t.address]);
+          const vworldFailed = withPnu.filter((t) => !pnuResults[t.pnu!]);
           if (vworldFailed.length > 0) {
             const kakaoReady = await kakaoReadyPromise;
             if (kakaoReady) {
@@ -477,8 +488,9 @@ export function useAuctionProperties(
           {
             const { cache } = store;
             let changed = 0;
-            for (const { id, address } of toGeocode) {
-              const coords = geocodeResults[address];
+            for (const { id, address, pnu: itemPnu } of toGeocode) {
+              // PNU 좌표를 우선한다 — 주소 좌표는 같은 주소의 다른 필지 것일 수 있다
+              const coords = (itemPnu && pnuResults[itemPnu]) || geocodeResults[address];
               if (coords) {
                 const existing = cache.get(id);
                 if (existing && !existing.lat) {
@@ -530,8 +542,11 @@ export function useAuctionProperties(
             if (refinedAddresses.size > 0) {
               const { cache } = store;
               let changed = 0;
-              for (const { id, address } of toGeocode) {
+              for (const { id, address, pnu: itemPnu } of toGeocode) {
                 if (!refinedAddresses.has(address)) continue;
+                // 자기 PNU로 이미 정확한 좌표를 받은 물건은 덮어쓰지 않는다.
+                // (같은 주소를 공유하는 PNU 없는 물건의 보정값이 넘어올 수 있음)
+                if (itemPnu && pnuResults[itemPnu]) continue;
                 const coords = geocodeResults[address];
                 const existing = cache.get(id);
                 if (existing && coords) {

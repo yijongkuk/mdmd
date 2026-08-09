@@ -61,22 +61,30 @@ export async function POST(request: Request) {
         if (item.pnu) {
           const parcel = await getParcelByPnu(item.pnu);
           if (parcel?.centroidLat && parcel?.centroidLng) {
-            return { address: item.address, coords: { lat: parcel.centroidLat, lng: parcel.centroidLng } };
+            return {
+              address: item.address,
+              pnu: item.pnu,
+              coords: { lat: parcel.centroidLat, lng: parcel.centroidLng },
+            };
           }
         }
-        return { address: item.address, coords: null };
+        return { address: item.address, pnu: item.pnu, coords: null };
       },
       CONCURRENCY,
     );
 
+    // 주소는 여러 필지가 공유할 수 있으므로(같은 지번의 여러 호실, 읍면동까지만
+    // 파악된 주소 등) PNU별 결과를 별도로 돌려준다. 주소로만 키잉하면 서로 다른
+    // 필지가 한 좌표를 공유해 마커와 지적경계가 어긋난다.
     const results: Record<string, { lat: number; lng: number }> = {};
-    for (const { address, coords: c } of coords) {
-      if (c) {
-        results[address] = c;
-      }
+    const pnuResults: Record<string, { lat: number; lng: number }> = {};
+    for (const { address, pnu, coords: c } of coords) {
+      if (!c) continue;
+      results[address] = c;
+      if (pnu) pnuResults[pnu] = c;
     }
 
-    return NextResponse.json({ results });
+    return NextResponse.json({ results, pnuResults });
   } catch (err) {
     console.error('geocode-batch error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
