@@ -155,9 +155,16 @@ function buildAddress(item: OnbidRlstItem): string {
 
   const nm = String(item.onbidCltrNm ?? '').trim();
   if (nm.startsWith(base)) {
-    // 번지(예: "994-6", "산 2-45")까지만 취하고 "제3층 제318호" 등 건물 상세는 버린다
-    const bunji = nm.slice(base.length).trim().match(/^(산\s*)?\d+(-\d+)?/);
-    if (bunji) return `${base} ${bunji[0].replace(/\s+/g, '')}`;
+    // 번지(예: "994-6", "산 2-45")까지만 취하고 "제3층 제318호" 등 건물 상세는 버린다.
+    // 읍·면 지역은 소재지 필드가 읍면까지만이라 물건명에 리(里)가 한 단계 더
+    // 붙는다("... 대관령면 횡계리 산 455"). 리를 건너뛰지 않으면 번지 추출이
+    // 실패해 면 중심점으로 지오코딩된다(실측 최대 4.7km 오차).
+    const m = nm.slice(base.length).trim().match(/^(?:([가-힣]+리)\s+)?(산\s*)?(\d+(?:-\d+)?)/);
+    if (m) {
+      const ri = m[1] ? `${m[1]} ` : '';
+      const san = m[2] ? '산' : '';
+      return `${base} ${ri}${san}${m[3]}`;
+    }
   }
   return base;
 }
