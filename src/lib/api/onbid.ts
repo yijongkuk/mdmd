@@ -131,6 +131,18 @@ function parseNum(raw: string | number | undefined): number | undefined {
  * 변환하지 않으면 V-World가 조회에 실패하거나(일반), 같은 본번-부번의
  * 다른 필지를 잘못 매칭한다(산 → 일반 지번으로 해석).
  */
+/**
+ * 특정 필지를 가리키는 PNU인지 판정.
+ * 여러 지번이 묶인 물건("... 남풍리 352-1, 352-2")은 본번·부번이 0000으로 와서
+ * 어떤 필지도 지목하지 않는다. 이런 값을 그대로 내보내면 V-World 조회가 실패할
+ * 뿐 아니라, 클라이언트가 이 PNU를 우선하느라 지오코딩으로 얻은 정상 PNU를
+ * 버리게 된다(hooks.ts의 `existing.pnu || kakaoPnuMap[address]`).
+ * PNU 없음으로 처리해야 주소 기반 경로가 정상 PNU를 찾아낸다.
+ */
+function isUsablePnu(pnu: string): boolean {
+  return pnu.length === 19 && pnu.slice(11, 15) !== '0000';
+}
+
 function normalizeOnbidPnu(pnu: string): string {
   if (pnu.length !== 19) return pnu;
   const mountain = pnu[10];
@@ -197,8 +209,12 @@ function mapItem(item: OnbidRlstItem): AuctionProperty {
     status: String(item.pbctStatNm ?? ''),
     onbidUrl: buildOnbidUrl(item),
     imageUrls: item.thnlImgUrlAdr ? [item.thnlImgUrlAdr] : [],
-    // 지번PNU는 OnBid 산구분 체계이므로 V-World 체계로 변환해서 넘긴다
-    pnu: item.ltnoPnu ? normalizeOnbidPnu(String(item.ltnoPnu)) : undefined,
+    // 지번PNU는 OnBid 산구분 체계이므로 V-World 체계로 변환해서 넘긴다.
+    // 필지를 특정하지 못하는 PNU(본번 0000)는 없는 것으로 취급한다.
+    pnu:
+      item.ltnoPnu && isUsablePnu(String(item.ltnoPnu))
+        ? normalizeOnbidPnu(String(item.ltnoPnu))
+        : undefined,
     area: landArea ?? bldArea,
     buildingArea: bldArea,
     // 서버가 지분물건 여부를 직접 알려준다 (구 GOODS_NM 정규식 추정 대체)
