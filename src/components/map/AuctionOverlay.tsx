@@ -4,7 +4,6 @@ import { useEffect, useRef, useCallback, memo } from 'react';
 import type { AuctionProperty } from '@/types/auction';
 import { formatWon } from '@/lib/utils/format';
 import { getKakaoMapInstance } from './KakaoMap';
-import { useAuctionStore } from '@/features/auction/store';
 
 // ─── Geometry type from V-World ──────────────────────────────
 interface GeoJsonPolygon {
@@ -63,25 +62,6 @@ interface AuctionOverlayProps {
 
 // ─── Display mode by zoom (Kakao: 1=closest, 14=farthest) ───
 type DisplayMode = 'cluster' | 'marker';
-
-/**
- * 마커를 필지 중심으로 재배치할 때 허용할 최대 이동 거리(m).
- * 이보다 멀면 다른 필지를 잘못 매칭한 것으로 보고 이동하지 않는다.
- * (재배치가 화면 밖으로 나가버리면 사용자에겐 마커가 "사라진" 것처럼 보인다)
- */
-const MAX_RELOCATE_M = 1000;
-
-/** 두 좌표 사이 거리(m) — Haversine */
-function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6_371_000;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
-}
 
 function getDisplayMode(zoom: number): DisplayMode {
   // 매물 수가 적으므로 zoom 8(시/군 수준)부터 개별 마커 표시
@@ -244,7 +224,6 @@ export const AuctionOverlay = memo(function AuctionOverlay({
   // ─── Fetch parcel data, draw polygon, relocate marker to centroid ───
   // Returns drawn overlay objects (polygon + hatch lines) for external management
   const drawPolygon = useCallback(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     async (
       property: AuctionProperty,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -252,7 +231,6 @@ export const AuctionOverlay = memo(function AuctionOverlay({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       kakao: any,
       gen?: number,
-      onRelocate?: (id: string, lat: number, lng: number) => void,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ): Promise<any[]> => {
       if (property.lat == null || property.lng == null) return [];
@@ -300,30 +278,16 @@ export const AuctionOverlay = memo(function AuctionOverlay({
       // 호출자(refreshPolygons)가 넘기는 gen은 polyGenRef 기준이다.
       if (gen != null && polyGenRef.current !== gen) return [];
 
-      // ── Relocate marker to parcel centroid ──
-      // 필지 중심이 원래 위치에서 너무 멀면(= 다른 필지 오매칭 가능성) 이동하지 않는다.
-      if (parcelData.centroidLat && parcelData.centroidLng) {
-        const moved = distanceMeters(
-          property.lat, property.lng,
-          parcelData.centroidLat, parcelData.centroidLng,
-        );
-        if (moved <= MAX_RELOCATE_M) {
-          const marker = markerByIdRef.current.get(property.id);
-          if (marker) {
-            try {
-              marker.setPosition(
-                new kakao.maps.LatLng(parcelData.centroidLat, parcelData.centroidLng),
-              );
-            } catch { /* CustomOverlay might not support setPosition in some versions */ }
-          }
-          // 화면상 위치만 바꾸면 store 좌표와 어긋나 뷰포트 판정이 틀어진다.
-          // 좌표 자체를 확정하도록 호출자에 알린다. 단 1m 미만 오차로는
-          // 알리지 않는다 — 리렌더가 폴리곤을 지웠다 다시 그리게 만든다.
-          if (moved > 1) {
-            onRelocate?.(property.id, parcelData.centroidLat, parcelData.centroidLng);
-          }
-        }
-      }
+      // 마커는 여기서 옮기지 않는다.
+      //
+      // 예전에는 지적경계를 그리면서 marker.setPosition으로 필지 중심에
+      // 붙였다. 구 API가 번지까지 있는 지번주소(LDNM_ADRS)를 줘서 지오코딩
+      // 좌표와 필지 중심이 몇 미터 차이였고, 그래서 이동이 보이지 않았다.
+      // 차세대 목록 API는 소재지를 읍·면·동까지만 주므로 이 이동이 수십~수백 m로
+      // 커져, 확대할 때마다 마커가 튀는 것처럼 보인다.
+      //
+      // 좌표 확정은 로딩 단계(geocode-batch의 PNU → 필지 중심)에서 이미 끝난다.
+      // 상호작용 중에 위치를 바꾸는 것은 이득 없이 혼란만 준다.
 
       if (!parcelData.geometry) return [];
 
@@ -515,17 +479,11 @@ export const AuctionOverlay = memo(function AuctionOverlay({
     );
 
     const maxPolygons = currentZoom <= 3 ? 40 : 30;
-    // 필지 중심으로 옮긴 좌표를 모아 한 번에 store에 반영한다
-    // (건건이 반영하면 오버레이 전체가 매번 재생성되어 깜빡인다)
-    const relocations: { id: string; lat: number; lng: number }[] = [];
-
     void fetchConcurrent(
       inView.slice(0, maxPolygons),
       async (p) => {
         if (polyGenRef.current !== gen) return;
-        const drawn = await drawPolygon(p, map, kakao, gen, (id, lat, lng) => {
-          relocations.push({ id, lat, lng });
-        });
+        const drawn = await drawPolygon(p, map, kakao, gen);
         if (polyGenRef.current === gen) {
           polygonsRef.current.push(...drawn);
         } else {
@@ -534,11 +492,7 @@ export const AuctionOverlay = memo(function AuctionOverlay({
         }
       },
       4,
-    ).then(() => {
-      if (polyGenRef.current === gen && relocations.length > 0) {
-        useAuctionStore.getState().setParcelCoords(relocations);
-      }
-    });
+    );
   }, [drawPolygon]);
 
   // Register idle listener once when map is ready, re-trigger on zoom/data changes
@@ -591,10 +545,7 @@ export const AuctionOverlay = memo(function AuctionOverlay({
     if (selectedId && map && window.kakao?.maps) {
       const selected = propertiesRef.current.find((p) => p.id === selectedId);
       if (selected) {
-        drawPolygon(selected, map, window.kakao, undefined, (id, lat, lng) => {
-          // 선택 경로에서도 좌표를 확정해 두어야 이후 뷰포트 판정과 어긋나지 않는다
-          useAuctionStore.getState().setParcelCoords([{ id, lat, lng }]);
-        }).then((drawn) => {
+        drawPolygon(selected, map, window.kakao).then((drawn) => {
           // Only push if selectedId hasn't changed during async fetch
           if (selectedIdRef.current === selectedId) {
             selPolygonsRef.current.push(...drawn);

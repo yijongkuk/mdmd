@@ -141,8 +141,6 @@ interface AuctionState {
   setFilters: (v: AuctionFilters) => void;
   /** 토양 난이도 캐시 업데이트 */
   setSoilDifficulty: (pnu: string, level: SoilDifficulty) => void;
-  /** 필지 중심좌표로 물건 좌표 확정 (지적경계 조회 결과 반영) */
-  setParcelCoords: (updates: { id: string; lat: number; lng: number }[]) => void;
   /** 지도 유형 설정 */
   setMapType: (type: MapType) => void;
   /** 물건을 "본 것"으로 기록 */
@@ -192,34 +190,6 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
         });
         changed++;
       }
-    }
-    if (changed > 0) {
-      set({ version: get().version + 1 });
-    }
-  },
-
-  /**
-   * 지적경계 조회로 얻은 필지 중심좌표를 물건 좌표로 확정한다.
-   *
-   * 오버레이에서 marker.setPosition만 하면 화면상 위치와 store 좌표가 어긋난다.
-   * 뷰포트 판정(어떤 물건의 경계를 그릴지)은 store 좌표로 하기 때문에, 사용자가
-   * 옮겨진 마커를 따라 확대하면 store 좌표가 화면 밖으로 나가 그 물건이 판정에서
-   * 빠지고 → 경계도 안 그려지고 마커도 원래(화면 밖) 좌표로 되돌아가 사라진다.
-   * 좌표를 store에 확정해 두 값을 일치시킨다.
-   */
-  setParcelCoords: (updates) => {
-    const { cache } = get();
-    let changed = 0;
-    for (const { id, lat, lng } of updates) {
-      const existing = cache.get(id);
-      if (!existing) continue;
-      // 1e-6도 ≈ 0.1m — 이보다 작은 차이는 무시해 불필요한 리렌더를 막는다
-      if (
-        existing.lat != null && existing.lng != null &&
-        Math.abs(existing.lat - lat) < 1e-6 && Math.abs(existing.lng - lng) < 1e-6
-      ) continue;
-      cache.set(id, { ...existing, lat, lng });
-      changed++;
     }
     if (changed > 0) {
       set({ version: get().version + 1 });
