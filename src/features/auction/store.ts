@@ -20,8 +20,11 @@ const STORAGE_TTL = 24 * 60 * 60 * 1000; // 1일 — 낙찰/취소 신선도 위
  *
  * 2: 차세대 온비드 전환 — PNU 산구분 변환 복구, 물건명에서 번지·리(里) 추출,
  *    본번 0000 PNU 무효 처리, 좌표를 PNU 기준으로 키잉
+ * 3: 지역 커버리지 수정 — 전남(전남광주통합특별시) 시도명 오류로 7,552건,
+ *    울산 항목 누락으로 1,678건이 통째로 빠져 있었다. 기존 캐시는 이 지역들이
+ *    없는 불완전한 목록이므로 폐기하고 다시 수집한다.
  */
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3;
 const VIEWED_KEY = 'auction-viewed-ids';
 const SOIL_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7일
 
