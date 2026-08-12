@@ -32,6 +32,13 @@ export interface AuctionSearchParams {
   size?: number;
   disposalMethodCode?: string;
   regionKeyword?: string; // lctnSdnm(소재지 시도) 필터 (서울, 경기, 인천 등 약칭)
+  /**
+   * 수의계약가능여부. 이 서비스의 필수 파라미터이고 Y/N이 상호배타적이라
+   * 지정하지 않으면 양쪽을 각각 조회해 합친다.
+   * Y와 N의 물건 수가 크게 다르므로(예: 경기 Y 4,462 / N 19,239) 호출부가
+   * 한쪽만 지정하면 빈 페이지 요청을 줄일 수 있다.
+   */
+  pvctTrgtYn?: 'Y' | 'N';
 }
 
 export interface AuctionListResponse {

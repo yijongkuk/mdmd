@@ -70,7 +70,10 @@ export async function GET(request: NextRequest) {
   const source = searchParams.get('source') ?? 'all'; // 'kamco', 'inst', 'all'
   const category = searchParams.get('category') ?? ''; // 'land' for 토지 only
   const skipGeocode = searchParams.get('skipGeocode') === 'true';
-  const regionKeyword = searchParams.get('regionKeyword') ?? ''; // CLTR_NM 서버 측 필터
+  const regionKeyword = searchParams.get('regionKeyword') ?? ''; // lctnSdnm 서버 측 필터
+  const shareParam = searchParams.get('pvctTrgtYn'); // 'Y' | 'N' — 없으면 양쪽 조회
+  const pvctTrgtYn: 'Y' | 'N' | undefined =
+    shareParam === 'Y' || shareParam === 'N' ? shareParam : undefined;
 
   try {
     const fetchPromises: Promise<{ properties: AuctionProperty[]; totalCount: number; apiError?: string }>[] = [];
@@ -80,6 +83,7 @@ export async function GET(request: NextRequest) {
       size,
       disposalMethodCode: method || undefined,
       regionKeyword: regionKeyword || undefined,
+      pvctTrgtYn,
     };
 
     if (source !== 'inst') {

@@ -38,14 +38,16 @@ const SIDO_MAP: Record<string, string> = {
   '부산': '부산광역시',
   '대구': '대구광역시',
   '대전': '대전광역시',
-  '광주': '광주광역시',
+  // 전라남도와 광주광역시는 '전남광주통합특별시'로 통합되어 API가 이 이름만 쓴다.
+  // '전라남도'/'광주광역시'로 조회하면 NODATA_ERROR가 나므로 둘 다 통합명으로 보낸다.
+  '전남': '전남광주통합특별시',
+  '광주': '전남광주통합특별시',
   '울산': '울산광역시',
   '세종': '세종특별자치시',
   '강원': '강원특별자치도',
   '충북': '충청북도',
   '충남': '충청남도',
   '전북': '전북특별자치도',
-  '전남': '전라남도',
   '경북': '경상북도',
   '경남': '경상남도',
   '제주': '제주특별자치도',
@@ -349,22 +351,26 @@ export async function getKamcoAuctionList(
   const page = params.page ?? 1;
   const size = params.size ?? 20;
   const regionKey = params.regionKeyword ?? '';
-  const cacheKey = `auction:kamco:${page}:${size}:${params.disposalMethodCode ?? ''}:${regionKey}`;
+  const cacheKey = `auction:kamco:${page}:${size}:${params.disposalMethodCode ?? ''}:${regionKey}:${params.pvctTrgtYn ?? 'both'}`;
   const cached = getCached<{ properties: AuctionProperty[]; totalCount: number }>(cacheKey);
   if (cached) return cached;
 
   try {
     // pvctTrgtYn(수의계약가능여부)은 이 서비스의 필수 파라미터다.
-    // Y/N은 상호배타적이므로 두 번 조회해 합치면 해당 조건의 전체 물건이 된다.
-    const [yes, no] = await Promise.all([
-      fetchListPage(params, 'Y'),
-      fetchListPage(params, 'N'),
-    ]);
+    // 호출부가 한쪽을 지정하면 그것만, 아니면 Y/N 양쪽을 조회해 합친다
+    // (Y와 N은 상호배타적이라 합집합이 전체가 된다).
+    const [yes, no] = params.pvctTrgtYn
+      ? params.pvctTrgtYn === 'Y'
+        ? [await fetchListPage(params, 'Y'), { items: [], totalCount: 0 } as RawPage]
+        : [{ items: [], totalCount: 0 } as RawPage, await fetchListPage(params, 'N')]
+      : await Promise.all([fetchListPage(params, 'Y'), fetchListPage(params, 'N')]);
 
-    // 한쪽이 0건인 것은 정상이므로, 양쪽 모두 실패했을 때만 에러로 본다
-    if (yes.apiError && no.apiError) {
-      console.error(`[OnBid] API error: ${yes.apiError} (region=${regionKey}, page=${page})`);
-      return { properties: [], totalCount: 0, apiError: yes.apiError };
+    // 조회한 쪽이 모두 실패했을 때만 에러로 본다 (한쪽이 0건인 것은 정상)
+    const errs = [yes.apiError, no.apiError].filter(Boolean);
+    const attempted = params.pvctTrgtYn ? 1 : 2;
+    if (errs.length === attempted) {
+      console.error(`[OnBid] API error: ${errs[0]} (region=${regionKey}, page=${page})`);
+      return { properties: [], totalCount: 0, apiError: errs[0] };
     }
 
     // 낙찰/취소 물건 제거 + 물건×공매조건 기준 중복 제거

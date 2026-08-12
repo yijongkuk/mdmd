@@ -9,7 +9,8 @@ interface FetchOptions {
   source?: string;      // 'kamco', 'inst', 'all'
   category?: string;    // 'land' for 토지 only
   skipGeocode?: boolean; // true → 지오코딩 건너뛰기 (빠른 응답)
-  regionKeyword?: string; // CLTR_NM 서버 측 지역 필터
+  regionKeyword?: string; // lctnSdnm 서버 측 지역 필터
+  pvctTrgtYn?: 'Y' | 'N';  // 수의계약가능여부 — 생략 시 양쪽 조회
 }
 
 export async function fetchAuctionProperties(
@@ -25,6 +26,7 @@ export async function fetchAuctionProperties(
   if (options?.category) params.set('category', options.category);
   if (options?.skipGeocode) params.set('skipGeocode', 'true');
   if (options?.regionKeyword) params.set('regionKeyword', options.regionKeyword);
+  if (options?.pvctTrgtYn) params.set('pvctTrgtYn', options.pvctTrgtYn);
   if (bounds) {
     params.set('swLat', String(bounds.sw.lat));
     params.set('swLng', String(bounds.sw.lng));

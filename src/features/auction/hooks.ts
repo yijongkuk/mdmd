@@ -15,22 +15,33 @@ import { useAuctionStore } from './store';
  * Zustand 글로벌 스토어로 데이터 유지 — 페이지 이동 후에도 재수집 안 함
  */
 
-const REGION_PAGES: { region: string; maxPages: number }[] = [
-  { region: '서울', maxPages: 4 },
-  { region: '경기', maxPages: 10 },
-  { region: '인천', maxPages: 3 },
-  { region: '부산', maxPages: 3 },
-  { region: '대구', maxPages: 2 },
-  { region: '대전', maxPages: 2 },
-  { region: '세종', maxPages: 1 },
-  { region: '강원', maxPages: 5 },
-  { region: '충북', maxPages: 3 },
-  { region: '충남', maxPages: 4 },
-  { region: '전북', maxPages: 3 },
-  { region: '전남', maxPages: 4 },
-  { region: '경북', maxPages: 5 },
-  { region: '경남', maxPages: 5 },
-  { region: '제주', maxPages: 2 },
+/**
+ * 지역별 수집 페이지 수 (1페이지 = 1,000건).
+ *
+ * 수의계약가능(Y)과 불가(N)의 물건 수가 크게 달라 페이지 수를 따로 잡는다.
+ * 예: 경기 Y 4,462건 / N 19,239건 — 같은 페이지 수를 쓰면 Y쪽에서 빈 요청이
+ * 15회씩 낭비된다. 나눠 잡으면 요청 수를 늘리지 않고 전 지역을 커버할 수 있다.
+ *
+ * 아래 수치는 2026-08-13 실측 기준이며 물건 수 변동에 대비해 여유를 뒀다.
+ * '전남'은 전라남도와 광주광역시가 통합된 '전남광주통합특별시'를 가리킨다.
+ */
+const REGION_PAGES: { region: string; yPages: number; nPages: number }[] = [
+  { region: '서울', yPages: 3, nPages: 7 },   // Y 1,253 / N 5,182
+  { region: '경기', yPages: 6, nPages: 21 },  // Y 4,462 / N 19,239
+  { region: '인천', yPages: 3, nPages: 6 },   // Y 1,415 / N 4,066
+  { region: '부산', yPages: 3, nPages: 4 },   // Y 1,583 / N 2,413
+  { region: '대구', yPages: 1, nPages: 3 },   // Y   315 / N 1,769
+  { region: '대전', yPages: 1, nPages: 2 },   // Y   242 / N   592
+  { region: '울산', yPages: 1, nPages: 3 },   // Y   304 / N 1,374
+  { region: '세종', yPages: 1, nPages: 2 },   // Y   109 / N   536
+  { region: '강원', yPages: 1, nPages: 10 },  // Y   465 / N 8,162
+  { region: '충북', yPages: 1, nPages: 5 },   // Y   279 / N 3,158
+  { region: '충남', yPages: 2, nPages: 6 },   // Y   926 / N 4,941
+  { region: '전북', yPages: 1, nPages: 5 },   // Y   486 / N 3,257
+  { region: '전남', yPages: 3, nPages: 7 },   // Y 1,849 / N 5,703 (광주 포함)
+  { region: '경북', yPages: 2, nPages: 7 },   // Y   998 / N 5,326
+  { region: '경남', yPages: 2, nPages: 8 },   // Y   996 / N 6,652
+  { region: '제주', yPages: 1, nPages: 3 },   // Y   603 / N 1,530
 ];
 
 /** 지역별 대략적 중심 좌표 */
@@ -41,6 +52,7 @@ const REGION_CENTERS: Record<string, { lat: number; lng: number }> = {
   '부산': { lat: 35.18, lng: 129.076 },
   '대구': { lat: 35.871, lng: 128.601 },
   '대전': { lat: 36.35, lng: 127.385 },
+  '울산': { lat: 35.539, lng: 129.311 },
   '세종': { lat: 36.48, lng: 127.0 },
   '강원': { lat: 37.881, lng: 127.73 },
   '충북': { lat: 36.636, lng: 127.492 },
@@ -63,15 +75,15 @@ function getRegionsByDistance(lat: number, lng: number): string[] {
     .map(([name]) => name);
 }
 
-/** 지역 순서대로 job 빌드 */
+/** 지역 순서대로 job 빌드 — 수의계약 Y/N을 별도 작업으로 나눈다 */
 function buildJobsSorted(regionOrder: string[]) {
-  const pageMap = new Map(REGION_PAGES.map((r) => [r.region, r.maxPages]));
-  const jobs: { region: string; page: number }[] = [];
+  const pageMap = new Map(REGION_PAGES.map((r) => [r.region, r]));
+  const jobs: { region: string; page: number; share: 'Y' | 'N' }[] = [];
   for (const region of regionOrder) {
-    const maxPages = pageMap.get(region) ?? 0;
-    for (let page = 1; page <= maxPages; page++) {
-      jobs.push({ region, page });
-    }
+    const cfg = pageMap.get(region);
+    if (!cfg) continue;
+    for (let page = 1; page <= cfg.nPages; page++) jobs.push({ region, page, share: 'N' });
+    for (let page = 1; page <= cfg.yPages; page++) jobs.push({ region, page, share: 'Y' });
   }
   return jobs;
 }
@@ -274,19 +286,19 @@ export function useAuctionProperties(
         // 지역 단위로만 관리하면 일부 페이지만 복구돼도 전체 성공으로 오판한다.
         const jobErrors = new Map<string, string>();
         // 일시적으로 실패해 재시도할 작업
-        const pendingRetry: { region: string; page: number }[] = [];
+        const pendingRetry: { region: string; page: number; share: 'Y' | 'N' }[] = [];
 
-        const runJob = async ({ region, page }: { region: string; page: number }) => {
-          const key = `${region}:${page}`;
+        const runJob = async ({ region, page, share }: { region: string; page: number; share: 'Y' | 'N' }) => {
+          const key = `${region}:${page}:${share}`;
           try {
             const r = await fetchAuctionProperties(null, {
               page, size: 1000, source: 'kamco',
-              regionKeyword: region, skipGeocode: true,
+              regionKeyword: region, skipGeocode: true, pvctTrgtYn: share,
             });
             const err = (r as { apiError?: string }).apiError;
             if (err) jobErrors.set(key, err);
             else jobErrors.delete(key);
-            return { r, region, page, err };
+            return { r, region, page, share, err };
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             jobErrors.set(key, msg);
@@ -294,13 +306,17 @@ export function useAuctionProperties(
               r: { properties: [] as AuctionProperty[], totalCount: 0, page, pageSize: 1000 },
               region,
               page,
+              share,
               err: msg,
             };
           }
         };
 
         const collect = (
-          { r, region, page, err }: { r: { properties: AuctionProperty[] }; region: string; page: number; err?: string },
+          { r, region, page, share, err }: {
+            r: { properties: AuctionProperty[] };
+            region: string; page: number; share: 'Y' | 'N'; err?: string;
+          },
           isRetryPass: boolean,
         ) => {
           // 치명적 오류(키/권한/한도)만 즉시 사용자에게 알린다.
@@ -309,7 +325,7 @@ export function useAuctionProperties(
             store.setApiError(err);
           } else if (err && !isRetryPass) {
             // 일시적 오류 → 로딩을 계속하고 뒤에서 한 번 더 시도
-            pendingRetry.push({ region, page });
+            pendingRetry.push({ region, page, share });
           }
           const tagged = r.properties.map((p) => ({ ...p, source: 'onbid' as const }));
           for (const p of tagged) if (p.id) freshOnbidIds.add(p.id);
