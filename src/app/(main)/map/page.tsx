@@ -5,10 +5,15 @@ import { useSearchParams } from 'next/navigation';
 import { cn } from '@/lib/cn';
 import type { MapBounds } from '@/types/land';
 import type { AuctionProperty, AuctionFilters } from '@/types/auction';
-import { useAuctionProperties, useAuctionStore, DEFAULT_FILTERS } from '@/features/auction';
+import { useAuctionProperties, useAuctionStore } from '@/features/auction';
 import { isLandCategory, isBuildingCategory, isExcludedCategory } from '@/lib/utils/propertyCategory';
 import { useBuilderStore } from '@/features/builder/store';
-import { KakaoMap, getKakaoMapInstance } from '@/components/map/KakaoMap';
+import {
+  KakaoMap,
+  DEFAULT_MAP_CENTER,
+  DEFAULT_MAP_LEVEL,
+  getKakaoMapInstance,
+} from '@/components/map/KakaoMap';
 import { AuctionOverlay } from '@/components/map/AuctionOverlay';
 import { ProjectOverlay } from '@/components/map/ProjectOverlay';
 import { AuctionInfoPanel } from '@/components/map/AuctionInfoPanel';
@@ -40,6 +45,19 @@ function hasActiveFilters(filters: AuctionFilters): boolean {
   );
 }
 
+function getAuctionApiErrorMessage(apiError: string): string {
+  if (/PER_SECOND|초당|\[23\]/i.test(apiError)) {
+    return 'API 초당 호출 제한에 걸렸습니다. 잠시 기다린 뒤 재시도하세요.';
+  }
+  if (/EXCEEDS|한도/i.test(apiError)) {
+    return 'API 일일 호출 한도를 초과했습니다. 자정 이후 재시도하거나, 폐교 데이터만 먼저 확인하세요.';
+  }
+  if (/NOT_REGISTERED|KEY/i.test(apiError)) {
+    return 'API 키가 유효하지 않습니다. .env.local의 ONBID_API_KEY를 확인하세요.';
+  }
+  return apiError;
+}
+
 export default function MapPage() {
   return (
     <Suspense fallback={<div className="flex h-[calc(100vh-3.5rem)] items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-300 border-t-blue-600" /></div>}>
@@ -54,10 +72,11 @@ function MapPageInner() {
   const paramLat = Number(searchParams.get('lat')) || 0;
   const paramLng = Number(searchParams.get('lng')) || 0;
   // 빌더 스토어 우선 (최신 필지), 없으면 URL 파라미터 fallback
-  const mapInitialCenter = parcelCenter
-    ?? ((paramLat && paramLng) ? { lat: paramLat, lng: paramLng } : undefined);
+  const requestedCenter = parcelCenter
+    ?? ((paramLat && paramLng) ? { lat: paramLat, lng: paramLng } : null);
+  const mapInitialCenter = requestedCenter ?? DEFAULT_MAP_CENTER;
   // 좌표가 전달되면 가까이 줌인 (level 4 ≈ 동네 수준)
-  const mapInitialLevel = mapInitialCenter ? 4 : undefined;
+  const mapInitialLevel = requestedCenter ? 4 : DEFAULT_MAP_LEVEL;
 
   const [bounds, setBounds] = useState<MapBounds | null>(null);
   const [zoomLevel, setZoomLevel] = useState(11);
@@ -80,7 +99,7 @@ function MapPageInner() {
 
   // OnBid 매각/임대 물건 — 실제 공매·매각·임대 유휴지만 표시
   const { properties: auctionProperties, isLoading: auctionsLoading, loadingRegion, progress, apiError, retry } =
-    useAuctionProperties(bounds, true, zoomLevel);
+    useAuctionProperties(bounds, true);
 
   // Client-side filtering (공통 필터 로직)
   const applyFilters = useCallback((p: AuctionProperty) => {
@@ -162,12 +181,14 @@ function MapPageInner() {
     const filtered = auctionProperties.filter(
       (p) => p.lat != null && p.lng != null && applyFilters(p),
     );
+    // 주소/물건명 검색은 현재 지도 화면이 아니라 수집된 전국 매물을 대상으로 한다.
+    if (filters.searchQuery.trim()) return filtered;
     if (!bounds) return filtered;
     return filtered.filter((p) => (
       p.lat! >= bounds.sw.lat && p.lat! <= bounds.ne.lat &&
       p.lng! >= bounds.sw.lng && p.lng! <= bounds.ne.lng
     ));
-  }, [auctionProperties, applyFilters, bounds]);
+  }, [auctionProperties, applyFilters, bounds, filters.searchQuery]);
 
   // 배치 토양 조회 — excludeDifficultSoil ON일 때만
   const soilAbortRef = useRef<AbortController | null>(null);
@@ -276,8 +297,8 @@ function MapPageInner() {
   const handleReset = useCallback(() => {
     const map = getKakaoMapInstance();
     if (map && window.kakao?.maps) {
-      map.setCenter(new window.kakao.maps.LatLng(37.5385, 127.0823));
-      map.setLevel(8);
+      map.setCenter(new window.kakao.maps.LatLng(DEFAULT_MAP_CENTER.lat, DEFAULT_MAP_CENTER.lng));
+      map.setLevel(DEFAULT_MAP_LEVEL);
     }
   }, []);
 
@@ -341,11 +362,7 @@ function MapPageInner() {
               </div>
               <p className="text-lg font-medium text-white">OnBid API 오류</p>
               <p className="text-sm text-white/70 text-center leading-relaxed">
-                {apiError.includes('EXCEEDS') || apiError.includes('한도')
-                  ? 'API 일일 호출 한도를 초과했습니다. 자정 이후 재시도하거나, 폐교 데이터만 먼저 확인하세요.'
-                  : apiError.includes('NOT_REGISTERED') || apiError.includes('KEY')
-                    ? 'API 키가 유효하지 않습니다. .env.local의 ONBID_API_KEY를 확인하세요.'
-                    : `${apiError}`}
+                {getAuctionApiErrorMessage(apiError)}
               </p>
               <div className="flex gap-3">
                 <button
@@ -448,7 +465,7 @@ function MapPageInner() {
                 <div className="h-2.5 w-2.5 animate-spin rounded-full border-2 border-slate-200 border-t-blue-500" />
               )}
               <span className="text-xs text-slate-600">
-                화면 {filteredProperties.length}건 / 전체 {auctionProperties.length}건
+                {filters.searchQuery.trim() ? '검색' : '화면'} {filteredProperties.length}건 / 전체 {auctionProperties.length}건
                 {loadingRegion && <span className="text-slate-400"> ({loadingRegion})</span>}
               </span>
             </div>

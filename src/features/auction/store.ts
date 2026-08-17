@@ -23,8 +23,9 @@ const STORAGE_TTL = 24 * 60 * 60 * 1000; // 1일 — 낙찰/취소 신선도 위
  * 3: 지역 커버리지 수정 — 전남(전남광주통합특별시) 시도명 오류로 7,552건,
  *    울산 항목 누락으로 1,678건이 통째로 빠져 있었다. 기존 캐시는 이 지역들이
  *    없는 불완전한 목록이므로 폐기하고 다시 수집한다.
+ * 4: 제주 우선 전국 수집 — 기존 서울 중심에서 생성된 부분 캐시를 폐기한다.
  */
-const CACHE_VERSION = 3;
+const CACHE_VERSION = 4;
 const VIEWED_KEY = 'auction-viewed-ids';
 const SOIL_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7일
 
@@ -41,12 +42,14 @@ function regionOfAddress(addr: string | undefined): string | null {
   if (a.startsWith('부산')) return '부산';
   if (a.startsWith('대구')) return '대구';
   if (a.startsWith('대전')) return '대전';
+  if (a.startsWith('울산')) return '울산';
   if (a.startsWith('세종')) return '세종';
   if (a.startsWith('강원')) return '강원';
   if (a.startsWith('충청북도') || a.startsWith('충북')) return '충북';
   if (a.startsWith('충청남도') || a.startsWith('충남')) return '충남';
   if (a.startsWith('전라북도') || a.startsWith('전북')) return '전북';
   if (a.startsWith('전라남도') || a.startsWith('전남')) return '전남';
+  if (a.startsWith('광주')) return '전남';
   if (a.startsWith('경상북도') || a.startsWith('경북')) return '경북';
   if (a.startsWith('경상남도') || a.startsWith('경남')) return '경남';
   if (a.startsWith('제주')) return '제주';
@@ -114,7 +117,9 @@ function loadPersistedFilters(): AuctionFilters {
     const raw = localStorage.getItem(FILTERS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<AuctionFilters>;
-      return { ...DEFAULT_FILTERS, ...parsed };
+      // 과거 버전의 숨은 수도권 필터가 남아 있으면 UI에서 해제할 수 없어
+      // 전국 데이터가 있어도 서울/경기만 보인다. 현재 지역 필터는 항상 전국으로 복원한다.
+      return { ...DEFAULT_FILTERS, ...parsed, region: 'all' };
     }
   } catch { /* ignore */ }
   return { ...DEFAULT_FILTERS };
@@ -290,7 +295,30 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
         localStorage.setItem(STORAGE_KEY, slimPayload);
         console.log(`[auction-cache] slim 모드 ${slim.length}건 저장 (${(slimPayload.length / 1024).toFixed(0)}KB)`);
       } catch {
-        console.warn('[auction-cache] slim 저장도 실패 — 캐시 비활성화');
+        // 전국 데이터가 브라우저 용량을 넘더라도 면접 핵심인 제주 캐시는 남긴다.
+        try {
+          localStorage.removeItem(STORAGE_KEY);
+          const jejuOnly = Array.from(get().cache.entries())
+            .filter(([, p]) => p.lat != null && p.address.startsWith('제주'))
+            .map(([id, p]) => [id, {
+              id: p.id, name: p.name, address: p.address,
+              disposalMethod: p.disposalMethod,
+              minBidPrice: p.minBidPrice, appraisalValue: p.appraisalValue,
+              bidStartDate: p.bidStartDate, bidEndDate: p.bidEndDate,
+              itemType: p.itemType, status: p.status, onbidUrl: p.onbidUrl,
+              pnu: p.pnu, area: p.area, officialLandPrice: p.officialLandPrice,
+              lat: p.lat, lng: p.lng, isShare: p.isShare, source: p.source,
+            }] as [string, AuctionProperty]);
+          const jejuPayload = JSON.stringify({
+            version: CACHE_VERSION,
+            timestamp: Date.now(),
+            data: jejuOnly,
+          });
+          localStorage.setItem(STORAGE_KEY, jejuPayload);
+          console.log(`[auction-cache] 제주 우선 모드 ${jejuOnly.length}건 저장`);
+        } catch {
+          console.warn('[auction-cache] 제주 캐시 저장도 실패 — 캐시 비활성화');
+        }
       }
     }
   },
@@ -345,10 +373,7 @@ export const useAuctionStore = create<AuctionState>((set, get) => ({
 
   triggerRetry: () => {
     const s = get();
-    s.cache.clear();
-    try { localStorage.removeItem(STORAGE_KEY); } catch { /* */ }
     set({
-      version: s.version + 1,
       initialFetchDone: false,
       apiError: null,
       retryCounter: s.retryCounter + 1,

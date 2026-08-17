@@ -20,6 +20,10 @@ const METRO_KEYWORDS = [
   '의왕', '포천', '양평', '여주', '동두천', '과천', '가평', '연천',
 ];
 
+// 성공한 지역/페이지 응답은 Vercel CDN에서 6시간 재사용한다. 브라우저를
+// 새로고침하거나 여러 사용자가 접속해도 상위 OnBid 일일 할당량을 반복 소모하지 않는다.
+const SUCCESS_CACHE_CONTROL = 'public, s-maxage=21600, stale-while-revalidate=86400';
+
 function isMetroArea(address: string): boolean {
   return METRO_KEYWORDS.some((kw) => address.includes(kw));
 }
@@ -191,13 +195,23 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({
-      properties: filtered,
-      totalCount,
-      page,
-      pageSize: size,
-      ...(apiError ? { apiError } : {}),
-    });
+    return NextResponse.json(
+      {
+        properties: filtered,
+        totalCount,
+        page,
+        pageSize: size,
+        ...(apiError ? { apiError } : {}),
+      },
+      {
+        headers: apiError
+          ? { 'Cache-Control': 'no-store' }
+          : {
+              'Cache-Control': SUCCESS_CACHE_CONTROL,
+              'Vercel-CDN-Cache-Control': SUCCESS_CACHE_CONTROL,
+            },
+      },
+    );
   } catch (e) {
     console.error('Auction API error:', e);
     return NextResponse.json(

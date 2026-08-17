@@ -60,7 +60,7 @@ export function MapControls({
       <ControlButton icon={<Plus className="h-4 w-4" />} label="확대" onClick={onZoomIn} />
       <ControlButton icon={<Minus className="h-4 w-4" />} label="축소" onClick={onZoomOut} />
       <div className="my-1" />
-      <ControlButton icon={<Locate className="h-4 w-4" />} label="서울 중심" onClick={onReset} />
+      <ControlButton icon={<Locate className="h-4 w-4" />} label="제주 중심" onClick={onReset} />
       <div className="relative" ref={dropdownRef}>
         <ControlButton
           icon={<Layers className="h-4 w-4" />}

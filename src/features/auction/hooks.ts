@@ -24,6 +24,9 @@ const PAGE_SIZE = 1000;
  */
 const MAX_PAGES_PER_REGION = 30;
 
+/** 면접/초기 탐색에서 반드시 먼저 확보할 지역 */
+const PRIORITY_REGION = '제주';
+
 /** 지역별 대략적 중심 좌표 */
 const REGION_CENTERS: Record<string, { lat: number; lng: number }> = {
   '서울': { lat: 37.5665, lng: 126.978 },
@@ -46,13 +49,17 @@ const REGION_CENTERS: Record<string, { lat: number; lng: number }> = {
 
 /** 좌표 기준으로 가까운 지역 순으로 정렬 */
 function getRegionsByDistance(lat: number, lng: number): string[] {
-  return Object.entries(REGION_CENTERS)
+  const nearestFirst = Object.entries(REGION_CENTERS)
+    .filter(([name]) => name !== PRIORITY_REGION)
     .sort(([, a], [, b]) => {
       const da = (lat - a.lat) ** 2 + (lng - a.lng) ** 2;
       const db = (lat - b.lat) ** 2 + (lng - b.lng) ** 2;
       return da - db;
     })
     .map(([name]) => name);
+
+  // 남은 할당량이 적더라도 제주 전 페이지가 먼저 확보되도록 고정한다.
+  return [PRIORITY_REGION, ...nearestFirst];
 }
 
 /**
@@ -75,12 +82,14 @@ async function runWithConcurrency<T>(
   tasks: (() => Promise<T>)[],
   concurrency: number,
   onResult?: (result: T, index: number) => void,
+  shouldStop?: () => boolean,
 ): Promise<T[]> {
   const results: T[] = [];
   let idx = 0;
 
   async function worker() {
     while (idx < tasks.length) {
+      if (shouldStop?.()) break;
       const i = idx++;
       const result = await tasks[i]();
       results[i] = result;
@@ -169,11 +178,18 @@ export interface LoadingProgress {
  * 로딩을 중단하거나 전체 화면을 에러로 덮으면 안 된다.
  */
 function isFatalApiError(msg: string): boolean {
+  // 공공데이터포털 code 23(초당 트래픽)은 잠시 기다리면 복구되므로 치명적이지 않다.
+  if (/\[23\]|PER_SECOND|초당/i.test(msg)) return false;
+
   // 게이트웨이는 영문 errMsg와 한글 returnAuthMsg를 모두 내려주므로 양쪽을 본다.
   // "초과"는 타임아웃 메시지("20초 timeout 초과")와 겹치므로 단독으로 쓰지 않는다.
-  return /EXCEEDS|LIMITED_NUMBER|NOT_REGISTERED|SERVICE_KEY|ACCESS_DENIED|DEADLINE|UNREGISTERED/i.test(
+  return /\[22\]|EXCEEDS|LIMITED_NUMBER|NOT_REGISTERED|SERVICE_KEY|ACCESS_DENIED|DEADLINE|UNREGISTERED/i.test(
     msg,
   ) || /한도|등록되지 않은|서비스키|인증키|활용기간|권한이 없/.test(msg);
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /** geocode-batch 서버 호출 — 주소별/PNU별 결과를 각각 병합 */
@@ -199,7 +215,6 @@ async function fetchGeocodeBatch(
 export function useAuctionProperties(
   bounds: MapBounds | null,
   enabled: boolean,
-  zoomLevel?: number,
 ) {
   const store = useAuctionStore();
   const retryCounter = useAuctionStore((s) => s.retryCounter);
@@ -220,16 +235,22 @@ export function useAuctionProperties(
     // 캐시가 이미 표시 중이면 풀스크린 로딩 오버레이를 띄우지 않고 조용히 갱신
     if (!hydrated) currentState.setIsLoading(true);
 
-    // 지도 중심 좌표 기준 지역 정렬
-    const centerLat = bounds ? (bounds.sw.lat + bounds.ne.lat) / 2 : 37.5385;
-    const centerLng = bounds ? (bounds.sw.lng + bounds.ne.lng) / 2 : 127.0823;
+    // 실제 bounds가 오기 전에도 제주를 기준으로 잡는다. getRegionsByDistance는
+    // 어느 위치에서 시작하더라도 제주를 1순위로 고정하고 나머지만 거리순 정렬한다.
+    const jejuCenter = REGION_CENTERS[PRIORITY_REGION];
+    const centerLat = bounds ? (bounds.sw.lat + bounds.ne.lat) / 2 : jejuCenter.lat;
+    const centerLng = bounds ? (bounds.sw.lng + bounds.ne.lng) / 2 : jejuCenter.lng;
     const regionOrder = getRegionsByDistance(centerLat, centerLng);
-    const seedJobs = buildSeedJobs(regionOrder);
+    const prioritySeedJobs = buildSeedJobs([PRIORITY_REGION]);
+    const nationwideSeedJobs = buildSeedJobs(
+      regionOrder.filter((region) => region !== PRIORITY_REGION),
+    );
+    const seedJobCount = prioritySeedJobs.length + nationwideSeedJobs.length;
 
-    // ── 폐교 유휴부지: 백그라운드 병렬 (OnBid 로딩을 블록하지 않음) ──
-    const fetchClosedSchools = async () => {
+    // 폐교 목록 자체는 정적 데이터라 먼저 읽되, 376건 좌표 변환은 전국 OnBid
+    // 좌표가 끝난 뒤 시작한다. V-World 할당량을 제주 매물보다 먼저 쓰지 않기 위함이다.
+    const fetchClosedSchoolList = async () => {
       try {
-        // 1) 목록 즉시 로드 (좌표 없이)
         const listRes = await fetch('/api/closed-schools');
         if (listRes.ok) {
           const listData = await listRes.json();
@@ -237,7 +258,11 @@ export function useAuctionProperties(
             store.mergeResults(listData.properties);
           }
         }
-        // 2) 지오코딩 (서버 캐시 히트 시 즉시, 미히트 시 수분 소요)
+      } catch { /* 폐교 데이터 실패 시 무시 — OnBid 로딩에 영향 없음 */ }
+    };
+
+    const geocodeClosedSchools = async () => {
+      try {
         const geoRes = await fetch('/api/closed-schools?geocode=true');
         if (geoRes.ok) {
           const geoData = await geoRes.json();
@@ -250,16 +275,16 @@ export function useAuctionProperties(
 
     (async () => {
       try {
-        // 폐교 데이터를 백그라운드로 시작 (await 하지 않음)
-        const closedSchoolPromise = fetchClosedSchools();
+        // 정적 목록만 백그라운드로 시작 (외부 지오코딩 호출 없음)
+        const closedSchoolListPromise = fetchClosedSchoolList();
 
         // Kakao SDK를 Phase 1 도중 미리 로딩 시작
         const kakaoReadyPromise = waitForKakaoServices();
 
-        // ── Phase 1: OnBid 매물 수집 (동시성 10) ──
+        // ── Phase 1: OnBid 매물 수집 ──
         // 총 작업 수는 첫 페이지 응답의 totalCount를 보고 늘어난다
         let phase1Done = 0;
-        let totalJobs = seedJobs.length;
+        let totalJobs = seedJobCount;
         store.setProgress({ phase: '매물 목록 수집 중', completed: 0, total: totalJobs, propertyCount: 0 });
         const t0 = performance.now();
 
@@ -268,31 +293,55 @@ export function useAuctionProperties(
         // 실패한 작업을 "지역:페이지" 단위로 추적한다. 한 지역에 여러 페이지가 있어
         // 지역 단위로만 관리하면 일부 페이지만 복구돼도 전체 성공으로 오판한다.
         const jobErrors = new Map<string, string>();
+        const cappedRegions = new Set<string>();
+        const incompleteRegions = new Set<string>();
         // 일시적으로 실패해 재시도할 작업
         const pendingRetry: { region: string; page: number; share: 'Y' | 'N' }[] = [];
 
         const runJob = async ({ region, page, share }: { region: string; page: number; share: 'Y' | 'N' }) => {
           const key = `${region}:${page}:${share}`;
-          try {
-            const r = await fetchAuctionProperties(null, {
-              page, size: PAGE_SIZE, source: 'kamco',
-              regionKeyword: region, skipGeocode: true, pvctTrgtYn: share,
-            });
-            const err = (r as { apiError?: string }).apiError;
-            if (err) jobErrors.set(key, err);
-            else jobErrors.delete(key);
-            return { r, region, page, share, err };
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            jobErrors.set(key, msg);
-            return {
-              r: { properties: [] as AuctionProperty[], totalCount: 0, page, pageSize: PAGE_SIZE },
-              region,
-              page,
-              share,
-              err: msg,
-            };
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              const r = await fetchAuctionProperties(null, {
+                page, size: PAGE_SIZE, source: 'kamco',
+                regionKeyword: region, skipGeocode: true, pvctTrgtYn: share,
+              });
+              const err = (r as { apiError?: string }).apiError;
+
+              // code 23은 일일 한도가 아니라 초당 제한이다. 타임아웃을 포함한
+              // 일시적 오류는 지수 백오프(+작은 jitter)로 같은 작업만 재시도한다.
+              if (err && !isFatalApiError(err) && attempt < 2) {
+                await wait(1_000 * (2 ** attempt) + Math.floor(Math.random() * 250));
+                continue;
+              }
+
+              if (err) jobErrors.set(key, err);
+              else jobErrors.delete(key);
+              return { r, region, page, share, err };
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : String(e);
+              if (attempt < 2) {
+                await wait(1_000 * (2 ** attempt) + Math.floor(Math.random() * 250));
+                continue;
+              }
+              jobErrors.set(key, msg);
+              return {
+                r: { properties: [] as AuctionProperty[], totalCount: 0, page, pageSize: PAGE_SIZE },
+                region,
+                page,
+                share,
+                err: msg,
+              };
+            }
           }
+
+          // 위 반복문은 성공 또는 오류 반환으로 항상 끝나지만 타입 추론용 안전망이다.
+          const err = '공매 API 재시도에 실패했습니다.';
+          jobErrors.set(key, err);
+          return {
+            r: { properties: [] as AuctionProperty[], totalCount: 0, page, pageSize: PAGE_SIZE },
+            region, page, share, err,
+          };
         };
 
         const collect = (
@@ -325,29 +374,58 @@ export function useAuctionProperties(
           });
         };
 
-        // 1단계: 지역×Y/N의 첫 페이지. 응답의 totalCount로 남은 페이지를 계산한다.
-        const restJobs: { region: string; page: number; share: 'Y' | 'N' }[] = [];
-        await runWithConcurrency(
-          seedJobs.map((job) => () => runJob(job)),
-          10,
-          (res) => {
-            const total = (res.r as { totalCount?: number }).totalCount ?? 0;
-            const pages = Math.min(Math.ceil(total / PAGE_SIZE), MAX_PAGES_PER_REGION);
-            for (let p = 2; p <= pages; p++) {
-              restJobs.push({ region: res.region, page: p, share: res.share });
-            }
-            totalJobs = seedJobs.length + restJobs.length;
-            collect(res, false);
-          },
-        );
+        /**
+         * 한 묶음의 첫 페이지를 받은 뒤 그 묶음의 나머지 페이지까지 끝낸다.
+         * 제주 묶음을 별도로 먼저 실행하므로 제주 N/Y 전체가 다른 시도보다 앞선다.
+         */
+        const runRegionStage = async (
+          seedJobs: { region: string; page: number; share: 'Y' | 'N' }[],
+          concurrency: number,
+        ) => {
+          const restJobs: { region: string; page: number; share: 'Y' | 'N' }[] = [];
+          await runWithConcurrency(
+            seedJobs.map((job) => () => runJob(job)),
+            concurrency,
+            (res) => {
+              if (!res.err) {
+                const total = (res.r as { totalCount?: number }).totalCount ?? 0;
+                const uncappedPages = Math.ceil(total / PAGE_SIZE);
+                const pages = Math.min(uncappedPages, MAX_PAGES_PER_REGION);
+                if (uncappedPages > MAX_PAGES_PER_REGION) cappedRegions.add(res.region);
+                for (let p = 2; p <= pages; p++) {
+                  restJobs.push({ region: res.region, page: p, share: res.share });
+                }
+                totalJobs += Math.max(0, pages - 1);
+              } else {
+                // 첫 페이지가 실패하면 전체 페이지 수를 알 수 없으므로, 뒤의 단일
+                // 재시도가 성공하더라도 이번 실행에서는 완전 수집으로 보지 않는다.
+                incompleteRegions.add(res.region);
+              }
+              collect(res, false);
+            },
+            () => fatalApiError !== null,
+          );
 
-        // 2단계: 계산된 나머지 페이지
-        if (restJobs.length > 0) {
+          if (fatalApiError || restJobs.length === 0) return;
+
+          const regionIndex = new Map(regionOrder.map((region, index) => [region, index]));
+          restJobs.sort((a, b) =>
+            (regionIndex.get(a.region) ?? 999) - (regionIndex.get(b.region) ?? 999)
+            || a.page - b.page
+            || a.share.localeCompare(b.share)
+          );
           await runWithConcurrency(
             restJobs.map((job) => () => runJob(job)),
-            10,
+            concurrency,
             (res) => collect(res, false),
+            () => fatalApiError !== null,
           );
+        };
+
+        // 제주 N/Y 전 페이지를 완전히 확보한 뒤에만 나머지 전국 수집을 시작한다.
+        await runRegionStage(prioritySeedJobs, 2);
+        if (!fatalApiError) {
+          await runRegionStage(nationwideSeedJobs, 3);
         }
 
         // 일시적으로 실패한 지역만 1회 재시도 — 전체 재로딩보다 훨씬 저렴하다
@@ -363,9 +441,10 @@ export function useAuctionProperties(
           });
           await runWithConcurrency(
             retryJobs.map((job) => () => runJob(job)),
-            5,
+            2,
             // runJob이 성공 시 jobErrors에서 해당 키를 지우므로 별도 해제가 필요 없다
             (res) => collect(res, true),
+            () => fatalApiError !== null,
           );
         }
 
@@ -378,7 +457,13 @@ export function useAuctionProperties(
         // 지역별 부분 prune: 요청이 모두 성공한 지역만 정리 → 일부 지역 실패해도
         // 나머지 지역의 낙찰/취소 물건은 정상적으로 제거됨(예전엔 1개만 실패해도 전체 생략됐음).
         const succeededRegions = new Set<string>(
-          regionOrder.filter((rg) => !regionFailed.has(rg))
+          fatalApiError
+            ? []
+            : regionOrder.filter(
+                (rg) => !regionFailed.has(rg)
+                  && !cappedRegions.has(rg)
+                  && !incompleteRegions.has(rg),
+              ),
         );
         if (succeededRegions.size > 0 && freshOnbidIds.size > 0) {
           store.reconcileOnbid(freshOnbidIds, succeededRegions);
@@ -394,6 +479,10 @@ export function useAuctionProperties(
             toGeocode.push({ id, address: p.address, pnu: p.pnu });
           }
         }
+        // API와 마찬가지로 좌표 할당량도 제주가 먼저 사용한다.
+        toGeocode.sort((a, b) =>
+          Number(!a.address.startsWith('제주')) - Number(!b.address.startsWith('제주'))
+        );
 
         if (toGeocode.length > 0) {
           const geocodeResults: Record<string, { lat: number; lng: number }> = {};
@@ -595,12 +684,14 @@ export function useAuctionProperties(
 
         console.log(`[perf] Total: ${((performance.now() - t0) / 1000).toFixed(1)}s — ${store.cache.size}건`);
 
-        // OnBid 완료 후에도 폐교 geocode가 아직 진행중일 수 있음 — 기다리지 않음
-        void closedSchoolPromise;
+        // OnBid(특히 제주) 좌표가 할당량을 먼저 사용한 뒤 폐교 좌표를 백그라운드 처리한다.
+        await closedSchoolListPromise;
+        void geocodeClosedSchools().then(() => {
+          useAuctionStore.getState().persistToStorage();
+        });
       } finally {
-        // 수집 완료 — 에러 없을 때만 localStorage에 캐시 저장
-        const currentApiError = useAuctionStore.getState().apiError;
-        if (!currentApiError) {
+        // 전국 중간에 한도가 끝나도 먼저 완료된 제주 데이터는 보존한다.
+        if (store.cache.size > 0) {
           store.persistToStorage();
         }
         store.setIsLoading(false);

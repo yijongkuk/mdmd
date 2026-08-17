@@ -279,14 +279,18 @@ function checkApiError(json: Record<string, unknown>): string | null {
   const svcResp = json?.OpenAPI_ServiceResponse as Record<string, unknown> | undefined;
   if (svcResp?.cmmMsgHeader) {
     const hdr = svcResp.cmmMsgHeader as Record<string, unknown>;
-    return String(hdr.returnAuthMsg ?? hdr.errMsg ?? 'UNKNOWN_API_ERROR');
+    const code = String(hdr.returnReasonCode ?? hdr.errMsg ?? 'AUTH');
+    const message = String(hdr.returnAuthMsg ?? hdr.errMsg ?? 'UNKNOWN_API_ERROR');
+    return `[${code}] ${message}`;
   }
 
   for (const src of [json?.result as Record<string, unknown> | undefined, extractHeader(json)]) {
     if (src?.resultCode == null) continue;
     const code = String(src.resultCode);
     if (code === NODATA_CODE) return 'NODATA';
-    if (!isOkCode(code)) return String(src.resultMsg ?? `ERROR_CODE_${code}`);
+    if (!isOkCode(code)) {
+      return `[${code}] ${String(src.resultMsg ?? `ERROR_CODE_${code}`)}`;
+    }
   }
   return null;
 }

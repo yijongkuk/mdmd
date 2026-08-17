@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { MapBounds } from '@/types/land';
 
 interface KakaoMapProps {
@@ -11,9 +11,9 @@ interface KakaoMapProps {
   children?: React.ReactNode;
 }
 
-// 서울 광진구 중심 (건대입구 부근)
-const KOREA_CENTER = { lat: 37.5385, lng: 127.0823 };
-const DEFAULT_LEVEL = 8;
+// 기본 탐색 위치: 제주도 중심
+export const DEFAULT_MAP_CENTER = { lat: 33.3617, lng: 126.5292 };
+export const DEFAULT_MAP_LEVEL = 8;
 
 declare global {
   interface Window {
@@ -92,6 +92,9 @@ export function KakaoMap({ onBoundsChange, onZoomChange, initialCenter, initialL
   const [sdkFailed, setSdkFailed] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<KakaoMapInstance | null>(null);
+  // 지도 인스턴스는 한 번만 만들므로 최초 진입 좌표/레벨을 고정해 사용한다.
+  const initialCenterRef = useRef(initialCenter);
+  const initialLevelRef = useRef(initialLevel);
 
   // Initialize Kakao Maps SDK - poll until loaded or timeout
   useEffect(() => {
@@ -126,11 +129,11 @@ export function KakaoMap({ onBoundsChange, onZoomChange, initialCenter, initialL
     if (!sdkReady || !containerRef.current || mapRef.current) return;
 
     const { kakao } = window;
-    const c = initialCenter ?? KOREA_CENTER;
+    const c = initialCenterRef.current ?? DEFAULT_MAP_CENTER;
     const center = new kakao.maps.LatLng(c.lat, c.lng);
     const map = new kakao.maps.Map(containerRef.current, {
       center,
-      level: initialLevel ?? DEFAULT_LEVEL,
+      level: initialLevelRef.current ?? DEFAULT_MAP_LEVEL,
     });
     mapRef.current = map;
 
@@ -213,7 +216,16 @@ export function KakaoMap({ onBoundsChange, onZoomChange, initialCenter, initialL
 
   // SDK failed - fallback UI
   if (sdkFailed) {
-    return <FallbackMap onBoundsChange={onBoundsChange} onZoomChange={onZoomChange}>{children}</FallbackMap>;
+    return (
+      <FallbackMap
+        onBoundsChange={onBoundsChange}
+        onZoomChange={onZoomChange}
+        initialCenter={initialCenter}
+        initialLevel={initialLevel}
+      >
+        {children}
+      </FallbackMap>
+    );
   }
 
   // Loading
@@ -234,14 +246,27 @@ export function getKakaoMapInstance(): KakaoMapInstance | null {
   return (window as any).__kakaoMapInstance as KakaoMapInstance | null;
 }
 
-function FallbackMap({ onBoundsChange, onZoomChange, children }: KakaoMapProps) {
+function FallbackMap({
+  onBoundsChange,
+  onZoomChange,
+  initialCenter,
+  initialLevel,
+  children,
+}: KakaoMapProps) {
+  const center = initialCenter ?? DEFAULT_MAP_CENTER;
+  const level = initialLevel ?? DEFAULT_MAP_LEVEL;
+
   useEffect(() => {
+    // SDK가 없어도 기본 제주 화면과 URL/빌더 좌표의 화면 범위를 일관되게 전달한다.
+    const closeUp = level <= 4;
+    const latSpan = closeUp ? 0.04 : 0.325;
+    const lngSpan = closeUp ? 0.06 : 0.575;
     onBoundsChange({
-      sw: { lat: 37.2, lng: 126.7 },
-      ne: { lat: 37.7, lng: 127.3 },
+      sw: { lat: center.lat - latSpan, lng: center.lng - lngSpan },
+      ne: { lat: center.lat + latSpan, lng: center.lng + lngSpan },
     });
-    onZoomChange(DEFAULT_LEVEL);
-  }, [onBoundsChange, onZoomChange]);
+    onZoomChange(level);
+  }, [center.lat, center.lng, level, onBoundsChange, onZoomChange]);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-slate-100">
@@ -260,7 +285,7 @@ function FallbackMap({ onBoundsChange, onZoomChange, children }: KakaoMapProps) 
       </div>
       <div className="absolute inset-0 flex items-center justify-center">
         <div className="text-center">
-          <p className="text-6xl font-bold text-slate-200">서울 / 경기</p>
+          <p className="text-6xl font-bold text-slate-200">제주</p>
           <p className="mt-2 text-lg text-slate-300">모두의 모듈 지도 뷰</p>
         </div>
       </div>
