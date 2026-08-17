@@ -15,34 +15,14 @@ import { useAuctionStore } from './store';
  * Zustand 글로벌 스토어로 데이터 유지 — 페이지 이동 후에도 재수집 안 함
  */
 
+/** 한 페이지에 받는 물건 수 */
+const PAGE_SIZE = 1000;
+
 /**
- * 지역별 수집 페이지 수 (1페이지 = 1,000건).
- *
- * 수의계약가능(Y)과 불가(N)의 물건 수가 크게 달라 페이지 수를 따로 잡는다.
- * 예: 경기 Y 4,462건 / N 19,239건 — 같은 페이지 수를 쓰면 Y쪽에서 빈 요청이
- * 15회씩 낭비된다. 나눠 잡으면 요청 수를 늘리지 않고 전 지역을 커버할 수 있다.
- *
- * 아래 수치는 2026-08-13 실측 기준이며 물건 수 변동에 대비해 여유를 뒀다.
- * '전남'은 전라남도와 광주광역시가 통합된 '전남광주통합특별시'를 가리킨다.
+ * 지역 하나에서 받을 최대 페이지 수 (안전장치).
+ * 페이지 수는 응답의 totalCount로 계산하므로 평소엔 이 값에 걸리지 않는다.
  */
-const REGION_PAGES: { region: string; yPages: number; nPages: number }[] = [
-  { region: '서울', yPages: 3, nPages: 7 },   // Y 1,253 / N 5,182
-  { region: '경기', yPages: 6, nPages: 21 },  // Y 4,462 / N 19,239
-  { region: '인천', yPages: 3, nPages: 6 },   // Y 1,415 / N 4,066
-  { region: '부산', yPages: 3, nPages: 4 },   // Y 1,583 / N 2,413
-  { region: '대구', yPages: 1, nPages: 3 },   // Y   315 / N 1,769
-  { region: '대전', yPages: 1, nPages: 2 },   // Y   242 / N   592
-  { region: '울산', yPages: 1, nPages: 3 },   // Y   304 / N 1,374
-  { region: '세종', yPages: 1, nPages: 2 },   // Y   109 / N   536
-  { region: '강원', yPages: 1, nPages: 10 },  // Y   465 / N 8,162
-  { region: '충북', yPages: 1, nPages: 5 },   // Y   279 / N 3,158
-  { region: '충남', yPages: 2, nPages: 6 },   // Y   926 / N 4,941
-  { region: '전북', yPages: 1, nPages: 5 },   // Y   486 / N 3,257
-  { region: '전남', yPages: 3, nPages: 7 },   // Y 1,849 / N 5,703 (광주 포함)
-  { region: '경북', yPages: 2, nPages: 7 },   // Y   998 / N 5,326
-  { region: '경남', yPages: 2, nPages: 8 },   // Y   996 / N 6,652
-  { region: '제주', yPages: 1, nPages: 3 },   // Y   603 / N 1,530
-];
+const MAX_PAGES_PER_REGION = 30;
 
 /** 지역별 대략적 중심 좌표 */
 const REGION_CENTERS: Record<string, { lat: number; lng: number }> = {
@@ -75,15 +55,17 @@ function getRegionsByDistance(lat: number, lng: number): string[] {
     .map(([name]) => name);
 }
 
-/** 지역 순서대로 job 빌드 — 수의계약 Y/N을 별도 작업으로 나눈다 */
-function buildJobsSorted(regionOrder: string[]) {
-  const pageMap = new Map(REGION_PAGES.map((r) => [r.region, r]));
+/**
+ * 1단계 작업 목록 — 지역×수의계약(Y/N)마다 첫 페이지만.
+ * 나머지 페이지는 응답의 totalCount를 보고 만든다. 페이지 수를 코드에
+ * 적어두면 물건이 늘었을 때 조용히 잘려나가므로(경기 10페이지 설정 /
+ * 실제 20페이지 필요 같은 사례) 응답에서 직접 계산한다.
+ */
+function buildSeedJobs(regionOrder: string[]) {
   const jobs: { region: string; page: number; share: 'Y' | 'N' }[] = [];
   for (const region of regionOrder) {
-    const cfg = pageMap.get(region);
-    if (!cfg) continue;
-    for (let page = 1; page <= cfg.nPages; page++) jobs.push({ region, page, share: 'N' });
-    for (let page = 1; page <= cfg.yPages; page++) jobs.push({ region, page, share: 'Y' });
+    jobs.push({ region, page: 1, share: 'N' });
+    jobs.push({ region, page: 1, share: 'Y' });
   }
   return jobs;
 }
@@ -242,8 +224,7 @@ export function useAuctionProperties(
     const centerLat = bounds ? (bounds.sw.lat + bounds.ne.lat) / 2 : 37.5385;
     const centerLng = bounds ? (bounds.sw.lng + bounds.ne.lng) / 2 : 127.0823;
     const regionOrder = getRegionsByDistance(centerLat, centerLng);
-    const allJobs = buildJobsSorted(regionOrder);
-    const totalJobs = allJobs.length;
+    const seedJobs = buildSeedJobs(regionOrder);
 
     // ── 폐교 유휴부지: 백그라운드 병렬 (OnBid 로딩을 블록하지 않음) ──
     const fetchClosedSchools = async () => {
@@ -276,7 +257,9 @@ export function useAuctionProperties(
         const kakaoReadyPromise = waitForKakaoServices();
 
         // ── Phase 1: OnBid 매물 수집 (동시성 10) ──
+        // 총 작업 수는 첫 페이지 응답의 totalCount를 보고 늘어난다
         let phase1Done = 0;
+        let totalJobs = seedJobs.length;
         store.setProgress({ phase: '매물 목록 수집 중', completed: 0, total: totalJobs, propertyCount: 0 });
         const t0 = performance.now();
 
@@ -292,7 +275,7 @@ export function useAuctionProperties(
           const key = `${region}:${page}:${share}`;
           try {
             const r = await fetchAuctionProperties(null, {
-              page, size: 1000, source: 'kamco',
+              page, size: PAGE_SIZE, source: 'kamco',
               regionKeyword: region, skipGeocode: true, pvctTrgtYn: share,
             });
             const err = (r as { apiError?: string }).apiError;
@@ -303,7 +286,7 @@ export function useAuctionProperties(
             const msg = e instanceof Error ? e.message : String(e);
             jobErrors.set(key, msg);
             return {
-              r: { properties: [] as AuctionProperty[], totalCount: 0, page, pageSize: 1000 },
+              r: { properties: [] as AuctionProperty[], totalCount: 0, page, pageSize: PAGE_SIZE },
               region,
               page,
               share,
@@ -342,11 +325,30 @@ export function useAuctionProperties(
           });
         };
 
+        // 1단계: 지역×Y/N의 첫 페이지. 응답의 totalCount로 남은 페이지를 계산한다.
+        const restJobs: { region: string; page: number; share: 'Y' | 'N' }[] = [];
         await runWithConcurrency(
-          allJobs.map((job) => () => runJob(job)),
+          seedJobs.map((job) => () => runJob(job)),
           10,
-          (res) => collect(res, false),
+          (res) => {
+            const total = (res.r as { totalCount?: number }).totalCount ?? 0;
+            const pages = Math.min(Math.ceil(total / PAGE_SIZE), MAX_PAGES_PER_REGION);
+            for (let p = 2; p <= pages; p++) {
+              restJobs.push({ region: res.region, page: p, share: res.share });
+            }
+            totalJobs = seedJobs.length + restJobs.length;
+            collect(res, false);
+          },
         );
+
+        // 2단계: 계산된 나머지 페이지
+        if (restJobs.length > 0) {
+          await runWithConcurrency(
+            restJobs.map((job) => () => runJob(job)),
+            10,
+            (res) => collect(res, false),
+          );
+        }
 
         // 일시적으로 실패한 지역만 1회 재시도 — 전체 재로딩보다 훨씬 저렴하다
         if (pendingRetry.length > 0 && !fatalApiError) {
@@ -370,13 +372,13 @@ export function useAuctionProperties(
         console.log(`[perf] Phase 1: ${((performance.now() - t0) / 1000).toFixed(1)}s — ${store.cache.size}건`);
 
         // 재시도까지 끝난 뒤 남은 실패 작업에서 지역 목록을 도출한다
-        const regionFailed = new Set([...jobErrors.keys()].map((k) => k.split(':')[0]));
+        const regionFailed = new Set<string>([...jobErrors.keys()].map((k) => k.split(':')[0]));
 
         // 최신 OnBid 목록과 대조하여 사라진(낙찰/취소된) 물건을 캐시에서 제거.
         // 지역별 부분 prune: 요청이 모두 성공한 지역만 정리 → 일부 지역 실패해도
         // 나머지 지역의 낙찰/취소 물건은 정상적으로 제거됨(예전엔 1개만 실패해도 전체 생략됐음).
-        const succeededRegions = new Set(
-          REGION_PAGES.map((r) => r.region).filter((rg) => !regionFailed.has(rg))
+        const succeededRegions = new Set<string>(
+          regionOrder.filter((rg) => !regionFailed.has(rg))
         );
         if (succeededRegions.size > 0 && freshOnbidIds.size > 0) {
           store.reconcileOnbid(freshOnbidIds, succeededRegions);
@@ -420,6 +422,31 @@ export function useAuctionProperties(
 
           const t1 = performance.now();
 
+          /**
+           * 지금까지 확보한 좌표를 캐시에 반영해 지도에 즉시 그린다.
+           * 예전에는 모든 좌표 변환이 끝난 뒤 한 번에 반영해서, 전국 1만여 건을
+           * 처리하는 약 2분 동안 지도에 아무것도 늘지 않았다. 지역 정렬상
+           * 수도권이 먼저 처리되므로 사용자에겐 "수도권만 나온다"로 보인다.
+           * 배치마다 반영하면 지방 물건이 순차적으로 나타난다.
+           */
+          const applyCoords = () => {
+            const { cache } = store;
+            let changed = 0;
+            for (const { id, address, pnu: itemPnu } of toGeocode) {
+              const coords = (itemPnu && pnuResults[itemPnu]) || geocodeResults[address];
+              if (!coords) continue;
+              const existing = cache.get(id);
+              if (!existing || existing.lat != null) continue;
+              const pnu = existing.pnu || kakaoPnuMap[address];
+              cache.set(id, { ...existing, lat: coords.lat, lng: coords.lng, ...(pnu ? { pnu } : {}) });
+              changed++;
+            }
+            if (changed > 0) {
+              useAuctionStore.setState({ version: useAuctionStore.getState().version + 1 });
+            }
+            return changed;
+          };
+
           // ── Phase 2a + 2b: V-World PNU와 Kakao를 동시 병렬 실행 ──
           await Promise.all([
             // 2a: PNU → V-World 필지 경계 (배치 2개 동시, 기존 순차 → 약 50% 단축)
@@ -442,6 +469,8 @@ export function useAuctionProperties(
                 batches.map((chunk) => async () => {
                   await fetchGeocodeBatch(chunk, geocodeResults, pnuResults);
                   geocodeDone += chunk.length;
+                  // 배치가 끝날 때마다 지도에 반영 — 지방 물건이 순차적으로 나타난다
+                  applyCoords();
                   store.setProgress({
                     phase: '좌표 변환 중',
                     completed: geocodeDone,
@@ -468,6 +497,7 @@ export function useAuctionProperties(
                 }
                 geocodeDone++;
                 if (geocodeDone % 20 === 0 || geocodeDone === totalToGeocode) {
+                  applyCoords(); // 진행 중에도 지도에 반영
                   store.setProgress({
                     phase: '좌표 변환 중',
                     completed: geocodeDone,
@@ -500,26 +530,9 @@ export function useAuctionProperties(
 
           console.log(`[perf] Phase 2a+2b: ${((performance.now() - t1) / 1000).toFixed(1)}s`);
 
-          // 중간 결과 적용 — Phase 2c 전에 마커 먼저 표시
-          {
-            const { cache } = store;
-            let changed = 0;
-            for (const { id, address, pnu: itemPnu } of toGeocode) {
-              // PNU 좌표를 우선한다 — 주소 좌표는 같은 주소의 다른 필지 것일 수 있다
-              const coords = (itemPnu && pnuResults[itemPnu]) || geocodeResults[address];
-              if (coords) {
-                const existing = cache.get(id);
-                if (existing && !existing.lat) {
-                  const pnu = existing.pnu || kakaoPnuMap[address];
-                  cache.set(id, { ...existing, lat: coords.lat, lng: coords.lng, ...(pnu ? { pnu } : {}) });
-                  changed++;
-                }
-              }
-            }
-            if (changed > 0) {
-              useAuctionStore.setState({ version: useAuctionStore.getState().version + 1 });
-            }
-          }
+          // 남은 결과 적용 — Phase 2c 전에 마커 먼저 표시
+          // (배치마다 이미 반영해 왔으므로 여기서는 마지막 잔여분만 처리된다)
+          applyCoords();
 
           // ── Phase 2c: Kakao PNU → V-World 필지 정밀 좌표 (배치 동시 실행) ──
           const kakaoPnuEntries = Object.entries(kakaoPnuMap);

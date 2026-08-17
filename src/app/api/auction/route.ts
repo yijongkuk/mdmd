@@ -84,6 +84,8 @@ export async function GET(request: NextRequest) {
       disposalMethodCode: method || undefined,
       regionKeyword: regionKeyword || undefined,
       pvctTrgtYn,
+      // 'land'/'building'이면 서버에서 용도중분류로 미리 걸러 받는다
+      category: category === 'land' || category === 'building' ? category : undefined,
     };
 
     if (source !== 'inst') {

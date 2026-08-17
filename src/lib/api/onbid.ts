@@ -24,6 +24,16 @@ const REQUEST_TIMEOUT_MS = 20_000;
  */
 const PRPT_DIV_ALL = '0007,0010,0005,0002,0003,0006,0008,0011,0013';
 
+/**
+ * 물건 카테고리 → 용도중분류코드(cltrUsgMclsCtgrId)
+ * 서버에서 미리 걸러 받으면 전송량과 좌표 변환량이 크게 준다.
+ * (전국 기준 전체 약 85,000건 → 토지만 약 36,000건)
+ */
+const CATEGORY_MCLS: Record<string, string> = {
+  land: '10100',                              // 토지
+  building: '10200,10300,10400,10500',        // 주거용/상가업무용/산업용/복합용 건물
+};
+
 /** 입찰결과구분코드(pbctStatCd) 중 유휴지 탐색 대상에서 제외할 종료 상태 */
 const DEAD_STATUS_CODES = new Set(['0010', '0012']); // 0010 낙찰, 0012 취소
 
@@ -302,6 +312,9 @@ async function fetchListPage(
     prptDivCd: PRPT_DIV_ALL,
   });
   if (params.disposalMethodCode) query.set('dspsMthodCd', params.disposalMethodCode);
+  // 용도 중분류를 서버에서 걸러 받는다 (지정하지 않으면 전 용도)
+  const mcls = params.category ? CATEGORY_MCLS[params.category] : undefined;
+  if (mcls) query.set('cltrUsgMclsCtgrId', mcls);
   if (params.regionKeyword) {
     // 정식 시도명으로 변환 (매핑에 없으면 입력값 그대로 시도)
     query.set('lctnSdnm', SIDO_MAP[params.regionKeyword] ?? params.regionKeyword);
@@ -351,7 +364,7 @@ export async function getKamcoAuctionList(
   const page = params.page ?? 1;
   const size = params.size ?? 20;
   const regionKey = params.regionKeyword ?? '';
-  const cacheKey = `auction:kamco:${page}:${size}:${params.disposalMethodCode ?? ''}:${regionKey}:${params.pvctTrgtYn ?? 'both'}`;
+  const cacheKey = `auction:kamco:${page}:${size}:${params.disposalMethodCode ?? ''}:${regionKey}:${params.pvctTrgtYn ?? 'both'}:${params.category ?? 'all'}`;
   const cached = getCached<{ properties: AuctionProperty[]; totalCount: number }>(cacheKey);
   if (cached) return cached;
 

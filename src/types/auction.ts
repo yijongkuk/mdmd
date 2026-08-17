@@ -39,6 +39,8 @@ export interface AuctionSearchParams {
    * 한쪽만 지정하면 빈 페이지 요청을 줄일 수 있다.
    */
   pvctTrgtYn?: 'Y' | 'N';
+  /** 'land' | 'building' — 지정 시 용도중분류를 서버에서 필터링한다 */
+  category?: string;
 }
 
 export interface AuctionListResponse {
